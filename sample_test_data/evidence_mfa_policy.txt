@@ -1,0 +1,42 @@
+MULTI-FACTOR AUTHENTICATION POLICY
+Document ID: SEC-POL-2026-004
+Version: 3.1 | Effective Date: January 15, 2026
+Classification: Internal Use Only
+
+1. PURPOSE
+This policy establishes requirements for multi-factor authentication (MFA) across all systems that process, store, or transmit cardholder data within the organization's cardholder data environment (CDE).
+
+2. SCOPE
+This policy applies to:
+- All remote access connections to the corporate network
+- All administrative access to CDE systems
+- All third-party vendor access to CDE
+- Console access to servers within the CDE
+
+3. MFA REQUIREMENTS
+3.1 All remote network access originating from outside the entity's network MUST use multi-factor authentication before granting access. This includes VPN connections, remote desktop sessions, and SSH access.
+
+3.2 Acceptable authentication factors include:
+- Something you know: password or passphrase (minimum 12 characters)
+- Something you have: hardware token (YubiKey), mobile authenticator app (Duo, Google Authenticator)
+- Something you are: fingerprint or facial recognition (for mobile access only)
+
+3.3 At least two of the three factor categories must be used for each authentication event.
+
+4. IMPLEMENTATION STATUS
+4.1 VPN Access: Duo MFA enforced for all VPN connections since March 2025. 100% enrollment as of January 2026.
+4.2 Admin Console Access: YubiKey required for all server console access. All 47 administrators enrolled.
+4.3 Third-Party Access: Vendor portal requires Duo MFA. 12 active vendor accounts, all MFA-enrolled.
+4.4 Cloud Management: AWS console access requires SSO + MFA via Okta. Azure portal uses Conditional Access with MFA.
+
+5. MONITORING AND COMPLIANCE
+5.1 Failed MFA attempts are logged and forwarded to the SIEM for real-time alerting.
+5.2 Monthly MFA compliance reports are generated showing enrollment rates, authentication success/failure rates.
+5.3 Quarterly audits verify that no exceptions exist for MFA requirements.
+
+6. EXCEPTIONS
+No permanent exceptions to MFA are permitted for CDE access. Temporary exceptions (max 24 hours) require CISO approval and must be logged in the exception tracker.
+
+Approved by: Sarah Chen, CISO
+Last Review: February 1, 2026
+Next Review: August 1, 2026

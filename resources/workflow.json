@@ -1,0 +1,130 @@
+{
+  "name": "audit_control_evaluation_pipeline",
+  "description": "End-to-end pipeline for AI-powered audit control evaluation",
+  "tags": {
+    "project": "audit-control-app",
+    "team": "audit-ai"
+  },
+  "tasks": [
+    {
+      "task_key": "ingest_controls",
+      "description": "Ingest control files from Unity Catalog Volume",
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/01_ingest_controls",
+        "base_parameters": {
+          "audit_id": "{{job.parameters.audit_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    },
+    {
+      "task_key": "ingest_evidence",
+      "description": "Ingest evidence files from Unity Catalog Volume",
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/01_ingest_evidence",
+        "base_parameters": {
+          "audit_id": "{{job.parameters.audit_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    },
+    {
+      "task_key": "parse_documents",
+      "description": "Extract text from evidence documents using AI Parse",
+      "depends_on": [
+        {"task_key": "ingest_evidence"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/02_parse_documents",
+        "base_parameters": {
+          "audit_id": "{{job.parameters.audit_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    },
+    {
+      "task_key": "chunk_documents",
+      "description": "Split extracted text into overlapping chunks",
+      "depends_on": [
+        {"task_key": "parse_documents"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/03_chunk_documents",
+        "base_parameters": {
+          "audit_id": "{{job.parameters.audit_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    },
+    {
+      "task_key": "generate_embeddings",
+      "description": "Generate embeddings for chunks and controls",
+      "depends_on": [
+        {"task_key": "chunk_documents"},
+        {"task_key": "ingest_controls"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/04_generate_embeddings",
+        "base_parameters": {
+          "audit_id": "{{job.parameters.audit_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    },
+    {
+      "task_key": "create_vector_index",
+      "description": "Create or sync Vector Search index",
+      "depends_on": [
+        {"task_key": "generate_embeddings"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/05_create_vector_index",
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    },
+    {
+      "task_key": "match_controls",
+      "description": "Match controls to evidence via Vector Search",
+      "depends_on": [
+        {"task_key": "create_vector_index"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/06_match_controls_to_evidence",
+        "base_parameters": {
+          "audit_id": "{{job.parameters.audit_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    },
+    {
+      "task_key": "llm_evaluate",
+      "description": "LLM evaluates each control against matched evidence",
+      "depends_on": [
+        {"task_key": "match_controls"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Users/akash.s@databricks.com/audit-control-app/07_llm_evaluate_controls",
+        "base_parameters": {
+          "audit_id": "{{job.parameters.audit_id}}"
+        },
+        "source": "WORKSPACE"
+      },
+      "environment_key": "default"
+    }
+  ],
+  "parameters": [
+    {
+      "name": "audit_id",
+      "default": ""
+    }
+  ],
+  "job_clusters": [],
+  "format": "MULTI_TASK"
+}

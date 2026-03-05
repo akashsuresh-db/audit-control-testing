@@ -1,0 +1,59 @@
+NETWORK SEGMENTATION ASSESSMENT REPORT
+Document ID: NET-ASM-2026-001
+Assessment Date: February 15, 2026
+Assessor: CyberDefense Solutions (Third-Party)
+
+1. ASSESSMENT SCOPE
+This assessment validates network segmentation controls isolating the Cardholder Data Environment (CDE) from all other corporate network segments, as required by PCI DSS Requirement 1.
+
+2. NETWORK ARCHITECTURE
+
+2.1 Network Zones Identified:
+- CDE Zone (VLAN 100-105): Payment processing servers, card databases, tokenization services
+- DMZ Zone (VLAN 200-202): Public-facing web servers, API gateways
+- Corporate Zone (VLAN 300-310): Employee workstations, email servers, internal apps
+- Management Zone (VLAN 400): Jump servers, monitoring, log aggregation
+- Guest/IoT Zone (VLAN 500): Guest WiFi, printers, IoT devices
+
+2.2 CDE Boundary:
+The CDE is bounded by two Palo Alto PA-5260 next-generation firewalls in HA configuration. All traffic entering or leaving the CDE traverses these firewalls.
+
+3. FIREWALL RULE REVIEW
+
+3.1 Inbound to CDE:
+- ALLOW: TCP 443 from DMZ API gateway (10.200.1.0/24) to payment processor (10.100.1.10)
+- ALLOW: TCP 1433 from application servers (10.100.2.0/24) to card database (10.100.3.10)
+- ALLOW: TCP 22 from Management Zone jump server (10.400.1.5) to CDE servers
+- DENY ALL: All other inbound traffic to CDE is blocked
+
+3.2 Outbound from CDE:
+- ALLOW: TCP 443 to payment processor endpoints (acquirer IPs - documented list)
+- ALLOW: TCP 443 to certificate revocation endpoints
+- ALLOW: UDP 53 to internal DNS (10.400.1.2)
+- ALLOW: TCP 514 to SIEM collector (10.400.1.20) for log forwarding
+- DENY ALL: All other outbound traffic from CDE is blocked
+
+3.3 Rule Review Findings:
+- Total rules: 23 (14 ALLOW, 9 DENY)
+- Rules with documented business justification: 23/23 (100%)
+- Overly permissive rules found: 0
+- Rules with expired justification: 0
+- Last rule review date: January 5, 2026
+
+4. PENETRATION TEST RESULTS (Segmentation Validation)
+4.1 Tests performed from Corporate Zone → CDE: 0 of 412 connection attempts succeeded
+4.2 Tests performed from Guest Zone → CDE: 0 of 389 connection attempts succeeded
+4.3 Tests performed from DMZ → CDE (unauthorized ports): 0 of 256 connection attempts succeeded
+4.4 Tests performed from CDE → unauthorized external: 0 of 198 connection attempts succeeded
+
+CONCLUSION: Network segmentation is EFFECTIVE. The CDE is properly isolated from all non-CDE network segments.
+
+5. WIRELESS NETWORK ASSESSMENT
+5.1 CDE wireless networks: NONE (no wireless access permitted within CDE physical boundary)
+5.2 Corporate wireless (SSID: Corp-Secure): WPA3-Enterprise, 802.1X authentication via RADIUS
+5.3 Guest wireless (SSID: Guest): WPA3-Personal, completely isolated from corporate and CDE networks
+5.4 Rogue AP scan: No unauthorized access points detected (scan date: Feb 14, 2026)
+
+Certified by: Michael Torres, CISSP, QSA
+CyberDefense Solutions
+February 15, 2026

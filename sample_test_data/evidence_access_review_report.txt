@@ -1,0 +1,70 @@
+ACCESS REVIEW REPORT - Q4 2025
+Prepared by: IT Security Team
+Date: January 10, 2026
+Report Period: October 1 - December 31, 2025
+
+EXECUTIVE SUMMARY
+Quarterly access review completed for all systems within the Cardholder Data Environment (CDE). Reviews covered 342 active user accounts across 8 critical systems.
+
+REVIEW RESULTS
+
+System: Payment Processing Server (PPS-01)
+- Total accounts: 47
+- Accounts reviewed: 47 (100%)
+- Accounts with appropriate access: 44
+- Accounts with excessive privileges: 2 (reduced to least privilege)
+- Accounts removed (terminated employees): 1
+
+System: Card Database Server (CDB-01)
+- Total accounts: 23
+- Accounts reviewed: 23 (100%)
+- Accounts with appropriate access: 22
+- Accounts with excessive privileges: 1 (DBA access removed from developer)
+- Accounts removed: 0
+
+System: Tokenization Service (TKN-01)
+- Total accounts: 15
+- Accounts reviewed: 15 (100%)
+- All accounts confirmed appropriate
+- No changes required
+
+System: Transaction Gateway (TGW-01 through TGW-04)
+- Total accounts: 89
+- Accounts reviewed: 89 (100%)
+- Accounts with appropriate access: 86
+- Service accounts with excessive privileges: 2 (permissions scoped down)
+- Accounts removed (role change): 1
+
+System: Reporting Dashboard (RPT-01)
+- Total accounts: 168
+- Accounts reviewed: 168 (100%)
+- Accounts with appropriate access: 161
+- Read-only access granted where write was unnecessary: 5
+- Accounts removed (terminated/transferred): 2
+
+TERMINATED EMPLOYEE VERIFICATION
+Cross-referenced HR termination list with all CDE system access:
+- Employees terminated in Q4 2025: 8
+- Access revoked within 24 hours: 7
+- Access revoked within 48 hours: 1 (weekend termination - Monday revocation)
+- Action taken: Process updated to include weekend on-call IT for immediate revocation
+
+UNIQUE ID VERIFICATION
+- Confirmed: All 342 active accounts have unique user IDs
+- Shared/generic accounts found: 0
+- Service accounts with individual accountability: 12/12 (all mapped to responsible owners)
+
+THIRD-PARTY ACCESS
+- Active vendor accounts: 12
+- Vendors with current NDA and security agreement: 12/12
+- Vendor access reviewed and appropriate: 12/12
+- Vendor accounts with MFA enabled: 12/12
+
+FINDINGS AND REMEDIATION
+1. One terminated employee (ID: EMP-4521) had access for 36 hours post-termination. Root cause: weekend processing. Remediated by adding weekend on-call rotation for access revocation.
+2. Three accounts had elevated privileges beyond job requirements. All reduced within 48 hours of discovery.
+
+SIGN-OFF
+Reviewed by: James Park, IT Security Manager
+Approved by: Sarah Chen, CISO
+Date: January 12, 2026

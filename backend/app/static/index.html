@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audit Control Evaluator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .fade-in { animation: fadeIn 0.25s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .sidebar-item { transition: background 0.15s; }
+    .sidebar-item:hover { background: rgba(255,255,255,0.08); }
+    .sidebar-item.active { background: rgba(255,255,255,0.12); border-left: 3px solid #3b82f6; }
+    .tab-btn { transition: all 0.15s; }
+    .tab-btn.active { color: #1e40af; border-bottom: 2px solid #1e40af; }
+    .confidence-bar { transition: width 0.6s ease; }
+    .line-clamp-4 { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body class="h-full bg-gray-50 text-gray-800">
+
+<div id="app" class="flex h-full">
+  <!-- Sidebar -->
+  <aside id="sidebar" class="w-72 min-w-[288px] bg-slate-900 text-white flex flex-col h-screen sticky top-0">
+    <!-- Logo -->
+    <div class="px-5 py-5 border-b border-slate-700/50">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="M9 12l2 2 4-4"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-sm font-semibold leading-tight">Audit Control</h1>
+          <p class="text-[11px] text-slate-400">Evaluator</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- New Audit -->
+    <div class="px-4 py-3">
+      <button onclick="openNewAuditModal()" class="w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        New Audit
+      </button>
+    </div>
+
+    <!-- Audit list -->
+    <div class="flex-1 overflow-y-auto px-2 pb-4">
+      <p class="px-3 py-2 text-[11px] uppercase tracking-wider text-slate-500 font-medium">Audits</p>
+      <div id="audit-list" class="space-y-0.5"></div>
+      <div id="audit-list-empty" class="hidden px-3 py-6 text-center text-sm text-slate-500">
+        No audits yet. Create one to get started.
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="px-4 py-3 border-t border-slate-700/50 text-[11px] text-slate-500">
+      Powered by Databricks
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="flex-1 min-w-0 overflow-y-auto">
+    <!-- Empty state -->
+    <div id="empty-state" class="flex items-center justify-center h-full">
+      <div class="text-center max-w-md">
+        <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        </div>
+        <h2 class="text-lg font-semibold text-gray-700 mb-2">Select or create an audit</h2>
+        <p class="text-sm text-gray-500 mb-4">Choose an audit from the sidebar or create a new one to begin evaluating controls.</p>
+        <button onclick="openNewAuditModal()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition">Create New Audit</button>
+      </div>
+    </div>
+
+    <!-- Audit Content -->
+    <div id="audit-content" class="hidden">
+      <!-- Header -->
+      <div class="bg-white border-b border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 id="audit-title" class="text-lg font-semibold text-gray-900"></h2>
+            <p id="audit-subtitle" class="text-sm text-gray-500 mt-0.5"></p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="audit-status-badge" class="text-xs font-medium px-2.5 py-1 rounded-full"></span>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex gap-0 mt-4 -mb-4 border-b-0">
+          <button class="tab-btn active px-4 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+          <button class="tab-btn px-4 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent" data-tab="controls" onclick="switchTab('controls')">Controls</button>
+          <button class="tab-btn px-4 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent" data-tab="evidence" onclick="switchTab('evidence')">Evidence</button>
+          <button class="tab-btn px-4 py-2.5 text-sm font-medium text-gray-500 border-b-2 border-transparent" data-tab="results" onclick="switchTab('results')">Results</button>
+        </div>
+      </div>
+
+      <!-- Tab Content -->
+      <div class="p-6">
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-content fade-in">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+            <!-- Audit Details Card -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+              <h3 class="text-sm font-semibold text-gray-700 mb-3">Audit Details</h3>
+              <dl class="space-y-2 text-sm">
+                <div class="flex justify-between"><dt class="text-gray-500">Framework</dt><dd id="detail-framework" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Client</dt><dd id="detail-client" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Status</dt><dd id="detail-status" class="font-medium"></dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Created</dt><dd id="detail-created" class="font-medium text-gray-600"></dd></div>
+              </dl>
+            </div>
+
+            <!-- Pipeline Status Card -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+              <h3 class="text-sm font-semibold text-gray-700 mb-3">Pipeline Status</h3>
+              <dl class="space-y-2 text-sm">
+                <div class="flex justify-between"><dt class="text-gray-500">Total Controls</dt><dd id="stat-total" class="font-semibold text-gray-800">--</dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Evaluated</dt><dd id="stat-evaluated" class="font-semibold text-blue-600">--</dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Reviewed</dt><dd id="stat-reviewed" class="font-semibold text-green-600">--</dd></div>
+                <div class="flex justify-between"><dt class="text-gray-500">Pipeline</dt><dd id="stat-pipeline" class="font-medium"></dd></div>
+              </dl>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+              <h3 class="text-sm font-semibold text-gray-700 mb-3">Quick Actions</h3>
+              <div class="space-y-2">
+                <button onclick="switchTab('controls')" class="w-full text-left text-sm px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition flex items-center gap-2">
+                  <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  Upload Controls
+                </button>
+                <button onclick="switchTab('evidence')" class="w-full text-left text-sm px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition flex items-center gap-2">
+                  <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                  Upload Evidence
+                </button>
+                <button onclick="triggerPipeline()" id="btn-run-pipeline" class="w-full text-left text-sm px-3 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 transition flex items-center gap-2 font-medium">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  Run Pipeline
+                </button>
+                <button onclick="exportResults()" class="w-full text-left text-sm px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition flex items-center gap-2">
+                  <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Export Results
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Summary Stats -->
+          <div id="overview-summary" class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+            <h3 class="text-sm font-semibold text-gray-700 mb-3">Verdict Summary</h3>
+            <div id="overview-summary-content" class="flex flex-wrap gap-3">
+              <span class="text-sm text-gray-400">No results yet. Run the pipeline to evaluate controls.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls Tab -->
+        <div id="tab-controls" class="tab-content hidden fade-in">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-base font-semibold text-gray-800">Controls</h3>
+            <button onclick="toggleControlUpload()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upload Controls
+            </button>
+          </div>
+
+          <!-- Upload Area -->
+          <div id="controls-upload" class="hidden mb-5 fade-in">
+            <div class="bg-white rounded-xl border-2 border-dashed border-gray-300 p-8 text-center">
+              <svg class="w-10 h-10 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <p class="text-sm text-gray-600 mb-1">Select a CSV file with controls</p>
+              <p class="text-xs text-gray-400 mb-3">Expected columns: control_code, control_title, risk_level, category, framework</p>
+              <input type="file" id="controls-file" accept=".csv" class="hidden" onchange="handleControlFileSelect(this)" />
+              <button onclick="document.getElementById('controls-file').click()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 px-4 rounded-lg transition">Choose File</button>
+              <p id="controls-file-name" class="text-sm text-gray-500 mt-2 hidden"></p>
+              <button id="controls-upload-btn" class="hidden mt-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition" onclick="uploadControls()">Upload</button>
+              <div id="controls-upload-status" class="hidden mt-3 text-sm"></div>
+            </div>
+          </div>
+
+          <!-- Controls Table -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div id="controls-loading" class="p-8 text-center text-sm text-gray-400">Loading controls...</div>
+            <div id="controls-empty" class="hidden p-8 text-center text-sm text-gray-400">No controls uploaded yet. Upload a CSV to get started.</div>
+            <div id="controls-table-wrap" class="hidden overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-gray-50 text-left">
+                  <tr>
+                    <th class="px-4 py-3 font-medium text-gray-600">Code</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Title</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Risk</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Category</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Framework</th>
+                  </tr>
+                </thead>
+                <tbody id="controls-tbody" class="divide-y divide-gray-100"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Evidence Tab -->
+        <div id="tab-evidence" class="tab-content hidden fade-in">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-base font-semibold text-gray-800">Evidence Documents</h3>
+            <button onclick="toggleEvidenceUpload()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upload Evidence
+            </button>
+          </div>
+
+          <!-- Upload Area -->
+          <div id="evidence-upload" class="hidden mb-5 fade-in">
+            <div id="evidence-drop-zone" class="bg-white rounded-xl border-2 border-dashed border-gray-300 p-8 text-center transition-colors"
+                 ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+              <svg class="w-10 h-10 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <p class="text-sm text-gray-600 mb-1">Drag & drop files or click to browse</p>
+              <p class="text-xs text-gray-400 mb-3">Accepted: PDF, TXT, PNG, JPG, DOCX, XLSX, CSV, DOC, PPTX</p>
+              <input type="file" id="evidence-files" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.txt,.csv,.doc,.xls,.pptx,.rtf" multiple class="hidden" onchange="handleEvidenceFileSelect(this)" />
+              <button onclick="document.getElementById('evidence-files').click()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 px-4 rounded-lg transition">Choose Files</button>
+              <div id="evidence-file-list" class="hidden mt-4 text-left max-w-md mx-auto"></div>
+              <button id="evidence-upload-btn" class="hidden mt-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition" onclick="uploadEvidence()">Upload All</button>
+              <div id="evidence-upload-status" class="hidden mt-3 text-sm"></div>
+            </div>
+          </div>
+
+          <!-- Evidence Table -->
+          <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div id="evidence-loading" class="p-8 text-center text-sm text-gray-400">Loading evidence...</div>
+            <div id="evidence-empty" class="hidden p-8 text-center text-sm text-gray-400">No evidence uploaded yet.</div>
+            <div id="evidence-table-wrap" class="hidden overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-gray-50 text-left">
+                  <tr>
+                    <th class="px-4 py-3 font-medium text-gray-600">Filename</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Type</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Size</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Parse Status</th>
+                    <th class="px-4 py-3 font-medium text-gray-600">Uploaded</th>
+                  </tr>
+                </thead>
+                <tbody id="evidence-tbody" class="divide-y divide-gray-100"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Results Tab -->
+        <div id="tab-results" class="tab-content hidden fade-in">
+          <div id="results-loading" class="p-8 text-center text-sm text-gray-400">Loading results...</div>
+          <div id="results-empty" class="hidden p-8 text-center text-sm text-gray-400">No evaluation results yet. Run the pipeline first.</div>
+          <div id="results-content" class="hidden">
+            <!-- Summary Bar -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-5 flex flex-wrap items-center gap-4">
+              <div id="results-summary-badges" class="flex flex-wrap gap-3"></div>
+              <div class="ml-auto text-sm text-gray-500">
+                Avg. Confidence: <span id="results-avg-confidence" class="font-semibold text-gray-800">--</span>
+              </div>
+            </div>
+
+            <!-- Result Cards -->
+            <div id="results-cards" class="space-y-4"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- New Audit Modal -->
+<div id="new-audit-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+  <div class="absolute inset-0 bg-black/40" onclick="closeNewAuditModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 fade-in">
+    <div class="px-6 py-5 border-b border-gray-200">
+      <h3 class="text-base font-semibold text-gray-900">Create New Audit</h3>
+    </div>
+    <form id="new-audit-form" class="px-6 py-5 space-y-4" onsubmit="createAudit(event)">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Audit Name</label>
+        <input name="audit_name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., Q1 2026 SOX Review" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Framework</label>
+        <select name="framework" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+          <option value="">Select framework...</option>
+          <option value="SOX">SOX</option>
+          <option value="SOC2">SOC2</option>
+          <option value="ISO27001">ISO 27001</option>
+          <option value="PCI-DSS">PCI-DSS</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Client Name</label>
+        <input name="client_name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="e.g., Acme Corp" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+        <textarea name="description" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none" placeholder="Optional description..."></textarea>
+      </div>
+      <div id="new-audit-error" class="hidden text-sm text-red-600"></div>
+      <div class="flex justify-end gap-3 pt-2">
+        <button type="button" onclick="closeNewAuditModal()" class="text-sm font-medium text-gray-600 hover:text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-100 transition">Cancel</button>
+        <button type="submit" id="new-audit-submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-5 rounded-lg transition">Create Audit</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Pipeline Status Modal -->
+<div id="pipeline-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center overflow-y-auto py-8">
+  <div class="absolute inset-0 bg-black/40" onclick="closePipelineModal()"></div>
+  <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-4xl mx-4 fade-in">
+    <div class="px-6 py-8 text-center">
+      <div id="pipeline-spinner" class="w-12 h-12 border-4 border-gray-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
+      <h3 class="text-base font-semibold text-gray-900 mb-1">Pipeline Running</h3>
+      <p id="pipeline-status-text" class="text-sm text-gray-500">Triggering evaluation...</p>
+      <div class="mt-4 flex justify-center gap-4 text-sm">
+        <div><span class="text-gray-500">Controls:</span> <span id="pipeline-total" class="font-semibold">--</span></div>
+        <div><span class="text-gray-500">Evaluated:</span> <span id="pipeline-evaluated" class="font-semibold">--</span></div>
+      </div>
+      <!-- Results table shown after completion -->
+      <div id="pipeline-results-section" class="hidden mt-6 text-left">
+        <div id="pipeline-summary-badges" class="flex justify-center gap-3 mb-4"></div>
+        <div class="overflow-x-auto rounded-lg border border-gray-200">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
+              <tr>
+                <th class="px-4 py-3 text-left">Control</th>
+                <th class="px-4 py-3 text-left">Title</th>
+                <th class="px-4 py-3 text-center">Risk</th>
+                <th class="px-4 py-3 text-center">Verdict</th>
+                <th class="px-4 py-3 text-center">Confidence</th>
+                <th class="px-4 py-3 text-left">Reasoning</th>
+              </tr>
+            </thead>
+            <tbody id="pipeline-results-body" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="mt-5 flex justify-center gap-3">
+        <button id="pipeline-done-btn" class="hidden bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 px-5 rounded-lg transition" onclick="closePipelineModal(); switchTab('results');">View Full Results</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-5 right-5 z-50 hidden">
+  <div class="bg-gray-900 text-white text-sm px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 max-w-sm">
+    <span id="toast-msg"></span>
+  </div>
+</div>
+
+<script>
+// ============ State ============
+let state = {
+  audits: [],
+  currentAuditId: null,
+  currentAudit: null,
+  currentTab: 'overview',
+  controls: [],
+  evidence: [],
+  results: [],
+  summary: [],
+  pipelineStatus: null,
+  pollingInterval: null,
+  evidenceFiles: [],
+};
+
+// ============ API Helpers ============
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Request failed');
+  }
+  return res.json();
+}
+
+function toast(msg, duration = 3000) {
+  const el = document.getElementById('toast');
+  document.getElementById('toast-msg').textContent = msg;
+  el.classList.remove('hidden');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.add('hidden'), duration);
+}
+
+// ============ Audits ============
+async function loadAudits() {
+  try {
+    state.audits = await api('/api/audits');
+    renderAuditList();
+  } catch (e) {
+    console.error('Failed to load audits', e);
+    state.audits = [];
+    renderAuditList();
+  }
+}
+
+function renderAuditList() {
+  const list = document.getElementById('audit-list');
+  const empty = document.getElementById('audit-list-empty');
+
+  if (!state.audits.length) {
+    list.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  list.innerHTML = state.audits.map(a => `
+    <button class="sidebar-item w-full text-left px-3 py-2.5 rounded-lg ${a.audit_id === state.currentAuditId ? 'active' : ''}"
+            onclick="selectAudit('${a.audit_id}')">
+      <div class="text-sm font-medium truncate">${esc(a.audit_name)}</div>
+      <div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2">
+        <span>${esc(a.framework || '')}</span>
+        <span class="inline-block w-1 h-1 rounded-full bg-slate-600"></span>
+        <span>${esc(a.client_name || '')}</span>
+      </div>
+    </button>
+  `).join('');
+}
+
+async function selectAudit(auditId) {
+  state.currentAuditId = auditId;
+  renderAuditList();
+
+  document.getElementById('empty-state').classList.add('hidden');
+  document.getElementById('audit-content').classList.remove('hidden');
+
+  try {
+    state.currentAudit = await api(`/api/audits/${auditId}`);
+  } catch (e) {
+    state.currentAudit = state.audits.find(a => a.audit_id === auditId) || {};
+  }
+
+  renderAuditHeader();
+  switchTab('overview');
+}
+
+function renderAuditHeader() {
+  const a = state.currentAudit;
+  if (!a) return;
+  document.getElementById('audit-title').textContent = a.audit_name || '';
+  document.getElementById('audit-subtitle').textContent = `${a.framework || ''} - ${a.client_name || ''}`;
+
+  const badge = document.getElementById('audit-status-badge');
+  const statusColors = {
+    CREATED: 'bg-gray-100 text-gray-700',
+    IN_PROGRESS: 'bg-blue-100 text-blue-700',
+    COMPLETED: 'bg-green-100 text-green-700',
+  };
+  badge.className = `text-xs font-medium px-2.5 py-1 rounded-full ${statusColors[a.status] || 'bg-gray-100 text-gray-700'}`;
+  badge.textContent = a.status || 'CREATED';
+}
+
+// ============ Tabs ============
+function switchTab(tab) {
+  state.currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+  const tabEl = document.getElementById(`tab-${tab}`);
+  if (tabEl) {
+    tabEl.classList.remove('hidden');
+    tabEl.classList.add('fade-in');
+  }
+
+  if (tab === 'overview') loadOverview();
+  else if (tab === 'controls') loadControls();
+  else if (tab === 'evidence') loadEvidence();
+  else if (tab === 'results') loadResults();
+}
+
+// ============ Overview ============
+async function loadOverview() {
+  if (!state.currentAuditId) return;
+
+  try {
+    const status = await api(`/api/audits/${state.currentAuditId}/status`);
+    state.pipelineStatus = status;
+
+    document.getElementById('detail-framework').textContent = state.currentAudit?.framework || '--';
+    document.getElementById('detail-client').textContent = state.currentAudit?.client_name || '--';
+    document.getElementById('detail-status').textContent = state.currentAudit?.status || '--';
+    document.getElementById('detail-created').textContent = formatDate(state.currentAudit?.created_at);
+
+    document.getElementById('stat-total').textContent = status.total_controls;
+    document.getElementById('stat-evaluated').textContent = status.evaluated;
+    document.getElementById('stat-reviewed').textContent = status.reviewed;
+
+    const pipeEl = document.getElementById('stat-pipeline');
+    const pipeColors = { COMPLETED: 'text-green-600', IN_PROGRESS: 'text-blue-600', PENDING: 'text-gray-500' };
+    pipeEl.textContent = status.status;
+    pipeEl.className = `font-medium ${pipeColors[status.status] || 'text-gray-500'}`;
+  } catch (e) {
+    console.error('Failed to load status', e);
+  }
+
+  try {
+    state.summary = await api(`/api/audits/${state.currentAuditId}/results/summary`);
+    renderOverviewSummary();
+  } catch (e) {
+    // no results yet
+  }
+}
+
+function renderOverviewSummary() {
+  const el = document.getElementById('overview-summary-content');
+  if (!state.summary || !state.summary.length) {
+    el.innerHTML = '<span class="text-sm text-gray-400">No results yet. Run the pipeline to evaluate controls.</span>';
+    return;
+  }
+  el.innerHTML = state.summary.map(s => {
+    const color = verdictColor(s.ai_verdict);
+    return `<div class="${color} px-3 py-1.5 rounded-lg text-sm font-medium">${esc(s.ai_verdict)}: ${s.count} <span class="text-xs opacity-70">(avg ${(s.avg_confidence * 100).toFixed(0)}%)</span></div>`;
+  }).join('');
+}
+
+// ============ Controls ============
+async function loadControls() {
+  if (!state.currentAuditId) return;
+  show('controls-loading'); hide('controls-empty'); hide('controls-table-wrap');
+
+  try {
+    state.controls = await api(`/api/audits/${state.currentAuditId}/controls`);
+    hide('controls-loading');
+
+    if (!state.controls.length) {
+      show('controls-empty');
+      return;
+    }
+    show('controls-table-wrap');
+    renderControlsTable();
+  } catch (e) {
+    hide('controls-loading');
+    show('controls-empty');
+  }
+}
+
+function renderControlsTable() {
+  const tbody = document.getElementById('controls-tbody');
+  tbody.innerHTML = state.controls.map(c => `
+    <tr class="hover:bg-gray-50">
+      <td class="px-4 py-3 font-medium text-gray-900">${esc(c.control_code)}</td>
+      <td class="px-4 py-3 text-gray-700 max-w-xs truncate">${esc(c.control_title)}</td>
+      <td class="px-4 py-3">${riskBadge(c.risk_level)}</td>
+      <td class="px-4 py-3 text-gray-600">${esc(c.control_category || '')}</td>
+      <td class="px-4 py-3 text-gray-600">${esc(c.framework || '')}</td>
+    </tr>
+  `).join('');
+}
+
+function toggleControlUpload() {
+  const el = document.getElementById('controls-upload');
+  el.classList.toggle('hidden');
+}
+
+function handleControlFileSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const nameEl = document.getElementById('controls-file-name');
+  nameEl.textContent = file.name;
+  nameEl.classList.remove('hidden');
+  document.getElementById('controls-upload-btn').classList.remove('hidden');
+}
+
+async function uploadControls() {
+  const fileInput = document.getElementById('controls-file');
+  if (!fileInput.files.length) return;
+
+  const btn = document.getElementById('controls-upload-btn');
+  const statusEl = document.getElementById('controls-upload-status');
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+
+  try {
+    const res = await api(`/api/audits/${state.currentAuditId}/controls`, { method: 'POST', body: fd });
+    statusEl.className = 'mt-3 text-sm text-green-600';
+    statusEl.textContent = `Uploaded: ${res.filename}. ${res.note || ''}`;
+    statusEl.classList.remove('hidden');
+    toast('Controls uploaded successfully');
+    setTimeout(() => { loadControls(); toggleControlUpload(); }, 1500);
+  } catch (e) {
+    statusEl.className = 'mt-3 text-sm text-red-600';
+    statusEl.textContent = `Error: ${e.message}`;
+    statusEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Upload';
+  }
+}
+
+// ============ Evidence ============
+async function loadEvidence() {
+  if (!state.currentAuditId) return;
+  show('evidence-loading'); hide('evidence-empty'); hide('evidence-table-wrap');
+
+  try {
+    state.evidence = await api(`/api/audits/${state.currentAuditId}/evidence`);
+    hide('evidence-loading');
+
+    if (!state.evidence.length) {
+      show('evidence-empty');
+      return;
+    }
+    show('evidence-table-wrap');
+    renderEvidenceTable();
+  } catch (e) {
+    hide('evidence-loading');
+    show('evidence-empty');
+  }
+}
+
+function renderEvidenceTable() {
+  const tbody = document.getElementById('evidence-tbody');
+  tbody.innerHTML = state.evidence.map(e => `
+    <tr class="hover:bg-gray-50">
+      <td class="px-4 py-3 font-medium text-gray-900 max-w-xs truncate">${esc(e.original_filename)}</td>
+      <td class="px-4 py-3 text-gray-600 uppercase text-xs">${esc(e.file_type || '')}</td>
+      <td class="px-4 py-3 text-gray-600">${formatSize(e.file_size_bytes)}</td>
+      <td class="px-4 py-3">${parseStatusBadge(e.parse_status)}</td>
+      <td class="px-4 py-3 text-gray-500 text-xs">${formatDate(e.uploaded_at)}</td>
+    </tr>
+  `).join('');
+}
+
+function toggleEvidenceUpload() {
+  const el = document.getElementById('evidence-upload');
+  el.classList.toggle('hidden');
+  state.evidenceFiles = [];
+  renderEvidenceFileList();
+}
+
+function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
+function handleDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  addEvidenceFiles(e.dataTransfer.files);
+}
+
+function handleEvidenceFileSelect(input) {
+  addEvidenceFiles(input.files);
+}
+
+function addEvidenceFiles(fileList) {
+  for (const f of fileList) {
+    if (!state.evidenceFiles.find(x => x.name === f.name && x.size === f.size)) {
+      state.evidenceFiles.push(f);
+    }
+  }
+  renderEvidenceFileList();
+}
+
+function removeEvidenceFile(idx) {
+  state.evidenceFiles.splice(idx, 1);
+  renderEvidenceFileList();
+}
+
+function renderEvidenceFileList() {
+  const listEl = document.getElementById('evidence-file-list');
+  const uploadBtn = document.getElementById('evidence-upload-btn');
+
+  if (!state.evidenceFiles.length) {
+    listEl.classList.add('hidden');
+    uploadBtn.classList.add('hidden');
+    return;
+  }
+  listEl.classList.remove('hidden');
+  uploadBtn.classList.remove('hidden');
+
+  listEl.innerHTML = state.evidenceFiles.map((f, i) => `
+    <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-50">
+      <div class="flex items-center gap-2 min-w-0">
+        <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span class="text-sm text-gray-700 truncate">${esc(f.name)}</span>
+        <span class="text-xs text-gray-400">${formatSize(f.size)}</span>
+      </div>
+      <button onclick="removeEvidenceFile(${i})" class="text-gray-400 hover:text-red-500 ml-2 flex-shrink-0">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+async function uploadEvidence() {
+  if (!state.evidenceFiles.length) return;
+
+  const btn = document.getElementById('evidence-upload-btn');
+  const statusEl = document.getElementById('evidence-upload-status');
+  btn.disabled = true;
+  btn.textContent = 'Uploading...';
+
+  const fd = new FormData();
+  state.evidenceFiles.forEach(f => fd.append('files', f));
+
+  try {
+    const res = await api(`/api/audits/${state.currentAuditId}/evidence`, { method: 'POST', body: fd });
+    statusEl.className = 'mt-3 text-sm text-green-600';
+    statusEl.textContent = `${res.count} file(s) uploaded successfully.`;
+    statusEl.classList.remove('hidden');
+    toast(`${res.count} evidence file(s) uploaded`);
+    state.evidenceFiles = [];
+    setTimeout(() => { loadEvidence(); toggleEvidenceUpload(); }, 1500);
+  } catch (e) {
+    statusEl.className = 'mt-3 text-sm text-red-600';
+    statusEl.textContent = `Error: ${e.message}`;
+    statusEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Upload All';
+  }
+}
+
+// ============ Results ============
+async function loadResults() {
+  if (!state.currentAuditId) return;
+  show('results-loading'); hide('results-empty'); hide('results-content');
+
+  try {
+    const [results, summary, evidenceMatches] = await Promise.all([
+      api(`/api/audits/${state.currentAuditId}/results`),
+      api(`/api/audits/${state.currentAuditId}/results/summary`),
+      api(`/api/audits/${state.currentAuditId}/evidence-matches`),
+    ]);
+    state.results = results;
+    state.summary = summary;
+    // Group evidence matches by control_id
+    state.evidenceByControl = {};
+    for (const m of evidenceMatches) {
+      if (!state.evidenceByControl[m.control_id]) state.evidenceByControl[m.control_id] = [];
+      state.evidenceByControl[m.control_id].push(m);
+    }
+    hide('results-loading');
+
+    if (!results.length) {
+      show('results-empty');
+      return;
+    }
+    show('results-content');
+    renderResultsSummary();
+    renderResultCards();
+  } catch (e) {
+    hide('results-loading');
+    show('results-empty');
+  }
+}
+
+function renderResultsSummary() {
+  const badgesEl = document.getElementById('results-summary-badges');
+  const avgEl = document.getElementById('results-avg-confidence');
+
+  let totalConf = 0, totalCount = 0;
+  const badgeHtml = state.summary.map(s => {
+    totalConf += (s.avg_confidence || 0) * (s.count || 0);
+    totalCount += s.count || 0;
+    return `<span class="${verdictColor(s.ai_verdict)} px-3 py-1.5 rounded-lg text-sm font-medium">${esc(s.ai_verdict)}: ${s.count}</span>`;
+  }).join('');
+
+  badgesEl.innerHTML = badgeHtml;
+  avgEl.textContent = totalCount ? `${((totalConf / totalCount) * 100).toFixed(1)}%` : '--';
+}
+
+function renderResultCards() {
+  const container = document.getElementById('results-cards');
+  container.innerHTML = state.results.map((r, idx) => {
+    const conf = (r.ai_confidence || 0);
+    const confPct = (conf * 100).toFixed(1);
+    const confBarColor = conf > 0.8 ? 'bg-green-500' : conf >= 0.5 ? 'bg-yellow-500' : 'bg-red-500';
+    const evidence = (state.evidenceByControl || {})[r.control_id] || [];
+    const uniqueDocs = [...new Set(evidence.map(e => e.original_filename))];
+    const hasReview = !!r.auditor_verdict;
+    const evId = `ev-panel-${idx}`;
+
+    return `
+    <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <!-- Card Header -->
+      <div class="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center gap-3">
+        <span class="font-mono text-sm font-semibold text-gray-900">${esc(r.control_code)}</span>
+        <span class="text-sm text-gray-600 flex-1 min-w-0 truncate">${esc(r.control_title)}</span>
+        ${riskBadge(r.risk_level)}
+        <span class="${verdictColor(r.ai_verdict)} px-2.5 py-1 rounded-full text-xs font-semibold">${esc(r.ai_verdict)}</span>
+      </div>
+
+      <div class="px-5 py-4 space-y-4">
+        <!-- Control Description -->
+        <div>
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Control Requirement</p>
+          <p class="text-sm text-gray-700 leading-relaxed">${esc(r.control_description || '')}</p>
+        </div>
+
+        <!-- Confidence -->
+        <div>
+          <div class="flex justify-between text-xs text-gray-500 mb-1">
+            <span>Confidence</span>
+            <span class="font-medium">${confPct}%</span>
+          </div>
+          <div class="w-full bg-gray-100 rounded-full h-2">
+            <div class="confidence-bar ${confBarColor} h-2 rounded-full" style="width: ${confPct}%"></div>
+          </div>
+        </div>
+
+        <!-- AI Reasoning -->
+        <div>
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">AI Reasoning</p>
+          <p class="text-sm text-gray-700 leading-relaxed">${esc(r.ai_reasoning || 'No reasoning provided.')}</p>
+        </div>
+
+        <!-- Matched Evidence Section -->
+        <div class="border-t border-gray-100 pt-4">
+          <button onclick="toggleEvidence('${evId}')" class="flex items-center gap-2 w-full text-left group">
+            <svg id="${evId}-chevron" class="w-4 h-4 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Retrieved Evidence</p>
+            <span class="text-xs text-gray-400 ml-auto">${evidence.length} chunks from ${uniqueDocs.length} document${uniqueDocs.length !== 1 ? 's' : ''}</span>
+          </button>
+
+          <div id="${evId}" class="hidden mt-3 space-y-2 max-h-96 overflow-y-auto">
+            ${evidence.length === 0 ? '<p class="text-sm text-gray-400 italic">No evidence matched for this control.</p>' : ''}
+            ${evidence.map((ev, i) => {
+              const simPct = ((ev.similarity_score || 0) * 100).toFixed(1);
+              const simColor = ev.similarity_score > 0.6 ? 'text-green-600' : ev.similarity_score > 0.5 ? 'text-yellow-600' : 'text-gray-500';
+              return `
+              <div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold">${ev.match_rank}</span>
+                  <span class="text-xs font-medium text-gray-700 truncate flex-1">${esc(ev.original_filename)}</span>
+                  <span class="text-xs font-semibold ${simColor}">${simPct}% match</span>
+                </div>
+                <p class="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap ${(ev.chunk_text || '').length > 300 ? 'line-clamp-4' : ''}" id="${evId}-chunk-${i}">${esc(ev.chunk_text || '')}</p>
+                ${(ev.chunk_text || '').length > 300 ? `
+                  <button onclick="expandChunk('${evId}-chunk-${i}', this)" class="text-xs text-blue-600 hover:text-blue-800 mt-1">Show more</button>
+                ` : ''}
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Auditor Review -->
+        <div class="border-t border-gray-100 pt-4">
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Auditor Review</p>
+          ${hasReview ? `
+            <div class="bg-gray-50 rounded-lg p-3 space-y-1">
+              <div class="flex items-center gap-2">
+                <span class="${verdictColor(r.auditor_verdict)} px-2 py-0.5 rounded text-xs font-semibold">${esc(r.auditor_verdict)}</span>
+                <span class="text-xs text-gray-400">by ${esc(r.auditor_id || 'unknown')}</span>
+              </div>
+              ${r.auditor_notes ? `<p class="text-sm text-gray-600">${esc(r.auditor_notes)}</p>` : ''}
+            </div>
+          ` : `
+            <form onsubmit="submitReview(event, '${r.evaluation_id}')" class="space-y-3">
+              <div class="flex flex-wrap gap-3">
+                <select name="verdict" required class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="">Select verdict...</option>
+                  <option value="PASS">PASS</option>
+                  <option value="FAIL">FAIL</option>
+                  <option value="INSUFFICIENT_EVIDENCE">INSUFFICIENT_EVIDENCE</option>
+                </select>
+                <input name="auditor_id" placeholder="Auditor ID" required class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-40" />
+              </div>
+              <textarea name="notes" placeholder="Notes (optional)" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-1.5 px-4 rounded-lg transition">Submit Review</button>
+            </form>
+          `}
+        </div>
+      </div>
+    </div>
+    `;
+  }).join('');
+}
+
+function toggleEvidence(panelId) {
+  const panel = document.getElementById(panelId);
+  const chevron = document.getElementById(panelId + '-chevron');
+  if (panel.classList.contains('hidden')) {
+    panel.classList.remove('hidden');
+    chevron.style.transform = 'rotate(90deg)';
+  } else {
+    panel.classList.add('hidden');
+    chevron.style.transform = 'rotate(0deg)';
+  }
+}
+
+function expandChunk(chunkId, btn) {
+  const el = document.getElementById(chunkId);
+  el.classList.remove('line-clamp-4');
+  btn.remove();
+}
+
+async function submitReview(e, evaluationId) {
+  e.preventDefault();
+  const form = e.target;
+  const data = {
+    verdict: form.verdict.value,
+    notes: form.notes.value,
+    auditor_id: form.auditor_id.value,
+  };
+
+  const btn = form.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  try {
+    await api(`/api/results/${evaluationId}/review`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+    toast('Review submitted');
+    loadResults();
+  } catch (err) {
+    toast(`Error: ${err.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Submit Review';
+  }
+}
+
+// ============ Pipeline ============
+async function triggerPipeline() {
+  if (!state.currentAuditId) return;
+
+  const modal = document.getElementById('pipeline-modal');
+  const statusText = document.getElementById('pipeline-status-text');
+  const spinner = document.getElementById('pipeline-spinner');
+  const doneBtn = document.getElementById('pipeline-done-btn');
+
+  modal.classList.remove('hidden');
+  spinner.classList.remove('hidden');
+  doneBtn.classList.add('hidden');
+  statusText.textContent = 'Triggering evaluation...';
+
+  try {
+    await api(`/api/audits/${state.currentAuditId}/evaluate`, { method: 'POST' });
+    statusText.textContent = 'Pipeline triggered. Checking status...';
+
+    // Start polling
+    if (state.pollingInterval) clearInterval(state.pollingInterval);
+    state.pollingInterval = setInterval(async () => {
+      try {
+        const s = await api(`/api/audits/${state.currentAuditId}/status`);
+        document.getElementById('pipeline-total').textContent = s.total_controls;
+        document.getElementById('pipeline-evaluated').textContent = s.evaluated;
+
+        if (s.status === 'COMPLETED') {
+          clearInterval(state.pollingInterval);
+          state.pollingInterval = null;
+          spinner.classList.add('hidden');
+          statusText.textContent = 'Evaluation complete!';
+          doneBtn.classList.remove('hidden');
+          await showPipelineResults();
+        } else if (s.status === 'IN_PROGRESS') {
+          statusText.textContent = `Evaluating controls... (${s.evaluated}/${s.total_controls})`;
+        } else {
+          statusText.textContent = 'Waiting for pipeline to start...';
+        }
+      } catch (err) {
+        // keep polling
+      }
+    }, 5000);
+  } catch (e) {
+    statusText.textContent = `Error: ${e.message}`;
+    spinner.classList.add('hidden');
+  }
+}
+
+async function showPipelineResults() {
+  try {
+    const results = await api(`/api/audits/${state.currentAuditId}/results`);
+    const section = document.getElementById('pipeline-results-section');
+    const tbody = document.getElementById('pipeline-results-body');
+    const badges = document.getElementById('pipeline-summary-badges');
+
+    // Summary badges
+    const counts = { PASS: 0, FAIL: 0, INSUFFICIENT_EVIDENCE: 0 };
+    results.forEach(r => { counts[r.ai_verdict] = (counts[r.ai_verdict] || 0) + 1; });
+    badges.innerHTML = `
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-green-100 text-green-800">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        PASS: ${counts.PASS}
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-red-100 text-red-800">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        FAIL: ${counts.FAIL}
+      </span>
+      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-amber-100 text-amber-800">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3l9.5 16.5H2.5L12 3z"/></svg>
+        INSUFFICIENT: ${counts.INSUFFICIENT_EVIDENCE}
+      </span>
+    `;
+
+    // Sort: FAIL first, then INSUFFICIENT, then PASS
+    const order = { FAIL: 0, INSUFFICIENT_EVIDENCE: 1, PASS: 2 };
+    results.sort((a, b) => (order[a.ai_verdict] ?? 3) - (order[b.ai_verdict] ?? 3));
+
+    // Build table rows
+    tbody.innerHTML = results.map(r => {
+      const vBg = r.ai_verdict === 'PASS' ? 'bg-green-100 text-green-800' :
+                  r.ai_verdict === 'FAIL' ? 'bg-red-100 text-red-800' :
+                  'bg-amber-100 text-amber-800';
+      const vLabel = r.ai_verdict === 'INSUFFICIENT_EVIDENCE' ? 'INSUFFICIENT' : r.ai_verdict;
+      const riskBg = r.risk_level === 'HIGH' ? 'bg-red-50 text-red-700' :
+                     r.risk_level === 'MEDIUM' ? 'bg-amber-50 text-amber-700' :
+                     'bg-green-50 text-green-700';
+      const conf = r.ai_confidence != null ? (r.ai_confidence * 100).toFixed(0) : '--';
+      const confColor = r.ai_confidence >= 0.8 ? 'bg-green-500' : r.ai_confidence >= 0.5 ? 'bg-yellow-500' : 'bg-red-500';
+      const reasoning = r.ai_reasoning ? (r.ai_reasoning.length > 150 ? r.ai_reasoning.substring(0, 150) + '...' : r.ai_reasoning) : '--';
+      return `<tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">${r.control_code || '--'}</td>
+        <td class="px-4 py-3 text-gray-700 max-w-[200px] truncate" title="${(r.control_title || '').replace(/"/g, '&quot;')}">${r.control_title || '--'}</td>
+        <td class="px-4 py-3 text-center"><span class="px-2 py-0.5 rounded text-xs font-semibold ${riskBg}">${r.risk_level || '--'}</span></td>
+        <td class="px-4 py-3 text-center"><span class="px-2.5 py-1 rounded-full text-xs font-bold ${vBg}">${vLabel}</span></td>
+        <td class="px-4 py-3">
+          <div class="flex items-center gap-2 justify-center">
+            <div class="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div class="${confColor} h-full rounded-full confidence-bar" style="width:${conf}%"></div>
+            </div>
+            <span class="text-xs font-medium text-gray-600">${conf}%</span>
+          </div>
+        </td>
+        <td class="px-4 py-3 text-xs text-gray-600 max-w-[300px]">${reasoning}</td>
+      </tr>`;
+    }).join('');
+
+    section.classList.remove('hidden');
+  } catch (e) {
+    console.error('Failed to load pipeline results:', e);
+  }
+}
+
+function closePipelineModal() {
+  document.getElementById('pipeline-modal').classList.add('hidden');
+  if (state.pollingInterval) {
+    clearInterval(state.pollingInterval);
+    state.pollingInterval = null;
+  }
+  loadOverview();
+}
+
+// ============ Export ============
+async function exportResults() {
+  if (!state.currentAuditId) return;
+  try {
+    const data = await api(`/api/audits/${state.currentAuditId}/export`);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `audit-${state.currentAuditId}-export.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Results exported');
+  } catch (e) {
+    toast(`Export failed: ${e.message}`);
+  }
+}
+
+// ============ New Audit Modal ============
+function openNewAuditModal() {
+  document.getElementById('new-audit-modal').classList.remove('hidden');
+  document.getElementById('new-audit-form').reset();
+  document.getElementById('new-audit-error').classList.add('hidden');
+}
+
+function closeNewAuditModal() {
+  document.getElementById('new-audit-modal').classList.add('hidden');
+}
+
+async function createAudit(e) {
+  e.preventDefault();
+  const form = e.target;
+  const btn = document.getElementById('new-audit-submit');
+  const errEl = document.getElementById('new-audit-error');
+  btn.disabled = true;
+  btn.textContent = 'Creating...';
+  errEl.classList.add('hidden');
+
+  const data = {
+    audit_name: form.audit_name.value,
+    framework: form.framework.value,
+    client_name: form.client_name.value,
+    description: form.description.value,
+  };
+
+  try {
+    const res = await api('/api/audits', { method: 'POST', body: JSON.stringify(data) });
+    closeNewAuditModal();
+    toast(`Audit ${res.audit_id} created`);
+    await loadAudits();
+    selectAudit(res.audit_id);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Audit';
+  }
+}
+
+// ============ Helpers ============
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+function show(id) { document.getElementById(id)?.classList.remove('hidden'); }
+function hide(id) { document.getElementById(id)?.classList.add('hidden'); }
+
+function verdictColor(v) {
+  const map = {
+    PASS: 'bg-green-100 text-green-800',
+    FAIL: 'bg-red-100 text-red-800',
+    INSUFFICIENT_EVIDENCE: 'bg-amber-100 text-amber-800',
+  };
+  return map[v] || 'bg-gray-100 text-gray-700';
+}
+
+function riskBadge(level) {
+  const colors = {
+    HIGH: 'bg-red-100 text-red-700',
+    MEDIUM: 'bg-amber-100 text-amber-700',
+    LOW: 'bg-green-100 text-green-700',
+  };
+  return `<span class="${colors[level] || 'bg-gray-100 text-gray-600'} px-2 py-0.5 rounded text-xs font-medium">${esc(level || '--')}</span>`;
+}
+
+function parseStatusBadge(status) {
+  const colors = {
+    COMPLETED: 'bg-green-100 text-green-700',
+    PENDING: 'bg-gray-100 text-gray-600',
+    FAILED: 'bg-red-100 text-red-700',
+    IN_PROGRESS: 'bg-blue-100 text-blue-700',
+  };
+  return `<span class="${colors[status] || 'bg-gray-100 text-gray-600'} px-2 py-0.5 rounded text-xs font-medium">${esc(status || '--')}</span>`;
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '--';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(d) {
+  if (!d) return '--';
+  try {
+    const dt = new Date(d);
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return d;
+  }
+}
+
+// ============ Init ============
+loadAudits();
+</script>
+</body>
+</html>

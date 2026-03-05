@@ -1,0 +1,11 @@
+command:
+  - uvicorn
+  - app.main:app
+  - --host
+  - 0.0.0.0
+  - --port
+  - "8000"
+
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "1b1d59e180e4ac26"

@@ -1,0 +1,79 @@
+AUDIT LOGGING AND MONITORING REPORT
+Report Period: January 2026
+Prepared by: Security Operations Center (SOC)
+
+1. LOG COLLECTION SUMMARY
+
+SIEM Platform: Splunk Enterprise Security 8.1
+Log Sources Active: 52 (all CDE systems reporting)
+
+System                          | Logs/Day   | Status
+Payment Processing Servers      | 2.1M       | Active - No gaps
+Card Database Servers           | 890K       | Active - No gaps
+Tokenization Service            | 450K       | Active - No gaps
+Transaction Gateways (4x)      | 3.8M       | Active - No gaps
+API Gateways                    | 1.2M       | Active - No gaps
+Firewalls (2x Palo Alto)       | 5.4M       | Active - No gaps
+IDS/IPS (Snort)                | 780K       | Active - No gaps
+File Integrity Monitoring       | 120K       | Active - No gaps
+Authentication Servers (LDAP)   | 340K       | Active - No gaps
+DNS Servers                     | 2.3M       | Active - No gaps
+Jump Servers                    | 45K        | Active - No gaps
+
+Total daily log volume: ~17.4M events
+Log retention: 12 months online, 36 months archived
+
+2. AUDIT TRAIL COVERAGE (PCI DSS 10.2 Requirements)
+
+10.2.1 - User access to cardholder data: LOGGED ✓
+  Evidence: Database query logs capture all SELECT/INSERT/UPDATE on PAN tables
+  Sample: User jpark accessed PAN lookup on Jan 15 at 14:32 UTC (ticket #INC-4521)
+
+10.2.2 - Actions by individuals with root/admin privileges: LOGGED ✓
+  Evidence: All sudo/admin commands logged with user ID, timestamp, command
+  Privileged sessions recorded via CyberArk PSM
+
+10.2.3 - Access to audit trails: LOGGED ✓
+  Evidence: Splunk access logs track all queries to log data
+  Immutable logging: logs forwarded to write-once storage
+
+10.2.4 - Invalid logical access attempts: LOGGED ✓
+  Evidence: Failed login attempts trigger real-time alert after 5 failures
+  January stats: 342 failed login events, 12 account lockouts, 0 confirmed attacks
+
+10.2.5 - Changes to identification/authentication mechanisms: LOGGED ✓
+  Evidence: Password changes, MFA enrollment/removal all logged
+
+10.2.6 - Initialization/stopping of audit logs: LOGGED ✓
+  Evidence: Automated alerts for any log source going silent >5 minutes
+
+10.2.7 - Creation/deletion of system-level objects: LOGGED ✓
+  Evidence: File integrity monitoring (Tripwire) on all CDE systems
+
+3. DAILY LOG REVIEW PROCESS
+
+Review Team: SOC Analysts (24x7 coverage, 3 shifts)
+Review Method: Combination of automated correlation rules + manual review
+
+Daily Review Checklist:
+☑ Review all critical/high alerts from previous 24 hours
+☑ Review failed authentication attempts across CDE
+☑ Review privilege escalation events
+☑ Review file integrity alerts
+☑ Review firewall deny logs for anomalies
+☑ Verify all log sources reporting (no gaps)
+
+January 2026 Review Metrics:
+- Days with completed reviews: 31/31 (100%)
+- Critical alerts investigated: 3 (all false positives)
+- High alerts investigated: 17 (2 required remediation)
+- Average time to acknowledge critical alert: 4 minutes
+- Average time to investigate: 22 minutes
+
+4. LOG INTEGRITY
+- Logs are forwarded to immutable storage (AWS S3 with Object Lock)
+- Hash verification on log files: Daily integrity checks, 0 tamper events detected
+- NTP synchronization: All CDE systems synced to internal NTP (drift < 1 second)
+
+SOC Manager: Alex Rivera
+Report Approved: February 3, 2026

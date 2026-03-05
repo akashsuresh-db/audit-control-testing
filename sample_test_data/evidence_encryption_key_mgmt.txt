@@ -1,0 +1,60 @@
+ENCRYPTION AND KEY MANAGEMENT PROCEDURES
+Document ID: SEC-PRO-2026-007
+Version: 2.4 | Last Updated: February 10, 2026
+
+1. DATA ENCRYPTION IN TRANSIT
+
+1.1 All cardholder data transmitted over public networks is encrypted using TLS 1.2 or TLS 1.3.
+1.2 Supported cipher suites (as of Feb 2026):
+   - TLS_AES_256_GCM_SHA384 (TLS 1.3)
+   - TLS_CHACHA20_POLY1305_SHA256 (TLS 1.3)
+   - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 (TLS 1.2)
+1.3 SSL/TLS 1.0 and 1.1 are DISABLED on all systems.
+1.4 Internal CDE traffic between application and database tiers uses TLS 1.3 mutual authentication.
+
+2. DATA ENCRYPTION AT REST
+
+2.1 Primary Account Numbers (PAN) stored in database: AES-256-GCM encryption
+2.2 Encryption performed at application layer before database storage
+2.3 Tokenization: PANs replaced with tokens for all non-essential storage
+2.4 Full disk encryption (BitLocker/LUKS) on all CDE servers
+
+3. KEY MANAGEMENT PROCEDURES
+
+3.1 Key Generation:
+- Keys generated using FIPS 140-2 Level 3 certified HSM (Thales Luna Network HSM)
+- Key generation requires dual control: two key custodians must be present
+- Each generation event logged with custodian IDs and timestamps
+
+3.2 Key Distribution:
+- Keys distributed via HSM-to-HSM secure channel
+- No keys transmitted in cleartext under any circumstances
+- Key components use split knowledge: no single person has full key
+
+3.3 Key Storage:
+- Master keys stored in HSM (tamper-resistant hardware)
+- Key-encrypting keys (KEK) stored separately from data-encrypting keys (DEK)
+- Backup key material stored in tamper-evident bags in bank safe deposit box
+
+3.4 Key Rotation:
+- Data encryption keys (DEK): Rotated annually (last rotation: January 15, 2026)
+- Key encryption keys (KEK): Rotated every 2 years (last rotation: July 2025)
+- TLS certificates: Rotated annually (automated via Let's Encrypt + internal CA)
+
+3.5 Key Destruction:
+- Retired keys zeroized in HSM and documented
+- Physical key material shredded with witnessed destruction log
+- Last key destruction: January 15, 2026 (previous year's DEK)
+
+3.6 Key Custodians:
+- Primary: David Kim (IT Security Lead) + Maria Santos (DBA Lead)
+- Backup: Robert Chang (Sr. Security Engineer) + Lisa Wang (Sr. DBA)
+- Custodians acknowledged responsibilities in writing (January 2026)
+
+4. COMPLIANCE VERIFICATION
+- HSM firmware version: 7.8.2 (FIPS 140-2 Level 3 validated)
+- Last HSM audit: November 2025
+- Key rotation compliance: 100% on schedule
+- Certificate expiry monitoring: Automated alerts 90/60/30 days before expiry
+
+Approved by: Sarah Chen, CISO
