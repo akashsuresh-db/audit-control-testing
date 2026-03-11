@@ -15,9 +15,15 @@ import csv
 import io
 from datetime import datetime
 
-from .lakebase import pg_execute, pg_fetch, pg_fetch_one, similarity_search
+# Both backends are optional — import whichever is available
+try:
+    from .lakebase import pg_execute, pg_fetch, pg_fetch_one, similarity_search
+except ImportError:
+    def pg_execute(*a, **kw): raise RuntimeError("pg8000 not installed")
+    def pg_fetch(*a, **kw): raise RuntimeError("pg8000 not installed")
+    def pg_fetch_one(*a, **kw): raise RuntimeError("pg8000 not installed")
+    def similarity_search(*a, **kw): raise RuntimeError("pg8000 not installed")
 
-# Databricks SQL connector is optional — only needed in "databricks" backend mode
 try:
     from .db import execute_sql, fetch_sql
 except ImportError:
