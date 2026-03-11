@@ -9,3 +9,13 @@ command:
 env:
   - name: DATABRICKS_WAREHOUSE_ID
     value: "1b1d59e180e4ac26"
+  - name: BACKEND_MODE
+    value: "lakebase"
+  - name: LAKEBASE_INSTANCE
+    value: "akash-finance-app"
+  - name: LAKEBASE_HOST
+    value: "instance-383773af-2ab5-4bfd-971d-9dba95011ab4.database.cloud.databricks.com"
+  - name: LAKEBASE_DB
+    value: "audit_platform"
+  - name: LAKEBASE_USER
+    value: "akash.s@databricks.com"
