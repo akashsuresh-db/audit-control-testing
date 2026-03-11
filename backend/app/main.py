@@ -780,6 +780,121 @@ async def run_similarity_search(audit_id: str, query_embedding: list[float], top
     return {"results": results, "count": len(results)}
 
 
+# ---- Continuous Monitoring ----
+
+@app.get("/api/monitoring/violations")
+async def detect_violations():
+    """Run continuous monitoring checks against operational data to detect control violations."""
+    violations = []
+
+    try:
+        # 1. Privileged accounts without MFA
+        if BACKEND_MODE == "databricks":
+            no_mfa = fetch_sql(
+                f"SELECT user_id, full_name, email, department, title "
+                f"FROM {FQ}.op_users WHERE privileged_access = true AND mfa_enabled = false AND status = 'ACTIVE'"
+            )
+        else:
+            no_mfa = []
+        for u in no_mfa:
+            violations.append({
+                "type": "PRIVILEGED_NO_MFA",
+                "severity": "CRITICAL",
+                "control": "SOX-AC-002",
+                "title": f"Privileged user without MFA: {u.get('full_name', u.get('user_id'))}",
+                "details": f"{u.get('title', '')} in {u.get('department', '')} ({u.get('email', '')})",
+                "entity_id": u.get("user_id"),
+            })
+
+        # 2. Terminated employees with active access (still in system)
+        if BACKEND_MODE == "databricks":
+            terminated = fetch_sql(
+                f"SELECT user_id, full_name, email, termination_date "
+                f"FROM {FQ}.op_users WHERE status = 'TERMINATED' AND termination_date IS NOT NULL"
+            )
+        else:
+            terminated = []
+        for u in terminated:
+            violations.append({
+                "type": "TERMINATED_ACTIVE_ACCESS",
+                "severity": "HIGH",
+                "control": "SOX-AC-003",
+                "title": f"Terminated employee record: {u.get('full_name', u.get('user_id'))}",
+                "details": f"Terminated on {u.get('termination_date', 'unknown')}",
+                "entity_id": u.get("user_id"),
+            })
+
+        # 3. Self-approved changes
+        if BACKEND_MODE == "databricks":
+            self_approved = fetch_sql(
+                f"SELECT ticket_id, title, requestor_id, approver_id, deployed_date "
+                f"FROM {FQ}.op_change_tickets WHERE requestor_id = approver_id LIMIT 50"
+            )
+        else:
+            self_approved = []
+        for t in self_approved:
+            violations.append({
+                "type": "SELF_APPROVED_CHANGE",
+                "severity": "CRITICAL",
+                "control": "SOX-CM-002",
+                "title": f"Self-approved change: {t.get('ticket_id')}",
+                "details": f"User {t.get('requestor_id')} both requested and approved. {t.get('title', '')}",
+                "entity_id": t.get("ticket_id"),
+            })
+
+        # 4. Deployed before approval
+        if BACKEND_MODE == "databricks":
+            early_deploy = fetch_sql(
+                f"SELECT ticket_id, title, requestor_id, approved_date, deployed_date "
+                f"FROM {FQ}.op_change_tickets WHERE deployed_date < approved_date LIMIT 50"
+            )
+        else:
+            early_deploy = []
+        for t in early_deploy:
+            violations.append({
+                "type": "DEPLOYED_BEFORE_APPROVAL",
+                "severity": "CRITICAL",
+                "control": "SOX-CM-001",
+                "title": f"Deployed before approval: {t.get('ticket_id')}",
+                "details": f"Deployed {t.get('deployed_date', '')} but approved {t.get('approved_date', '')}",
+                "entity_id": t.get("ticket_id"),
+            })
+
+        # 5. Overdue access reviews
+        if BACKEND_MODE == "databricks":
+            overdue = fetch_sql(
+                f"SELECT review_id, user_id, system_name, review_date, days_overdue "
+                f"FROM {FQ}.op_access_reviews WHERE days_overdue > 30 LIMIT 50"
+            )
+        else:
+            overdue = []
+        for r in overdue:
+            violations.append({
+                "type": "OVERDUE_ACCESS_REVIEW",
+                "severity": "HIGH",
+                "control": "SOX-AC-003",
+                "title": f"Overdue access review: {r.get('user_id')} on {r.get('system_name')}",
+                "details": f"Review date {r.get('review_date', '')}, {r.get('days_overdue', 0)} days overdue",
+                "entity_id": r.get("review_id"),
+            })
+
+    except Exception as e:
+        violations.append({"type": "MONITORING_ERROR", "severity": "INFO", "control": "", "title": f"Monitoring check error: {str(e)[:200]}", "details": "", "entity_id": ""})
+
+    # Summary
+    summary = {}
+    for v in violations:
+        t = v["type"]
+        summary[t] = summary.get(t, 0) + 1
+
+    return {
+        "total_violations": len(violations),
+        "summary": summary,
+        "violations": violations,
+        "checked_at": datetime.utcnow().isoformat(),
+    }
+
+
 # ---- Evidence Sufficiency Engine ----
 
 @app.get("/api/audits/{audit_id}/sufficiency")

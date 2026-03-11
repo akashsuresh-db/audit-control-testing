@@ -11,6 +11,7 @@ import WorkpapersPage from './pages/WorkpapersPage'
 import SamplingPage from './pages/SamplingPage'
 import ReportsPage from './pages/ReportsPage'
 import AuditLogPage from './pages/AuditLogPage'
+import MonitoringPage from './pages/MonitoringPage'
 
 export default function App() {
   const { loadAudits, sidebarCollapsed } = useStore()
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/workpapers" element={<WorkpapersPage />} />
           <Route path="/sampling" element={<SamplingPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
         </Routes>
       </main>

@@ -14,6 +14,7 @@ import {
   Building2,
   BookOpen,
   Dice5,
+  ShieldAlert,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -25,6 +26,7 @@ const navItems = [
   { path: '/findings', label: 'Findings', icon: AlertTriangle },
   { path: '/workpapers', label: 'Workpapers', icon: BookOpen },
   { path: '/sampling', label: 'Sampling', icon: Dice5 },
+  { path: '/monitoring', label: 'Monitoring', icon: ShieldAlert },
   { path: '/reports', label: 'Reports', icon: BarChart3 },
   { path: '/audit-log', label: 'Audit Trail', icon: ClipboardList },
 ]
