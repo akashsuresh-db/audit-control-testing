@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore'
 import PageHeader from '../components/shared/PageHeader'
 import StatCard from '../components/shared/StatCard'
 import Modal from '../components/shared/Modal'
+import WorkflowTracker from '../components/shared/WorkflowTracker'
 import {
   Shield,
   FileText,
@@ -147,6 +148,9 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
+          {/* Workflow Progress Tracker */}
+          <WorkflowTracker />
+
           {/* Stats Grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCard label="Controls" value={controls.length} icon={Shield} />

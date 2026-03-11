@@ -13,7 +13,13 @@ import os
 import uuid
 import csv
 import io
+import time
+import logging
 from datetime import datetime
+from fastapi import Request, Response
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("auditlens")
 
 # Both backends are optional — import whichever is available
 try:
@@ -58,6 +64,19 @@ TEXT_FORMATS = {"txt", "csv", "rtf"}
 BACKEND_MODE = os.environ.get("BACKEND_MODE", "lakebase")
 
 
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    """Log API response times."""
+    if request.url.path.startswith("/api/"):
+        start = time.time()
+        response = await call_next(request)
+        elapsed = round((time.time() - start) * 1000)
+        response.headers["X-Response-Time"] = f"{elapsed}ms"
+        logger.info(f"{request.method} {request.url.path} — {elapsed}ms")
+        return response
+    return await call_next(request)
+
+
 # ---- Pydantic Models ----
 
 class AuditCreate(BaseModel):
@@ -90,13 +109,72 @@ async def health():
     return {"status": "healthy", "backend": BACKEND_MODE, "timestamp": datetime.utcnow().isoformat()}
 
 
+@app.get("/api/audits/{audit_id}/batch")
+async def get_audit_batch(audit_id: str):
+    """Single batch endpoint returning all data needed for the dashboard.
+    Uses fetch_sql with caching to avoid multiple cold-start connections."""
+    t0 = time.time()
+
+    try:
+        if BACKEND_MODE == "databricks":
+            audit_rows = fetch_sql(
+                f"SELECT * FROM {FQ}.audit_engagements WHERE audit_id = :aid",
+                {"aid": audit_id}, cache_key=f"audit_{audit_id}",
+            )
+            controls = fetch_sql(
+                f"SELECT control_id, audit_id, control_code, framework, control_title, "
+                f"control_description, control_category, risk_level, frequency, control_owner "
+                f"FROM {FQ}.controls WHERE audit_id = :aid ORDER BY control_code",
+                {"aid": audit_id}, cache_key=f"controls_{audit_id}",
+            )
+            evidence = fetch_sql(
+                f"SELECT document_id, audit_id, original_filename, file_type, file_size_bytes, "
+                f"page_count, parse_status, ocr_applied, uploaded_at "
+                f"FROM {FQ}.evidence_documents WHERE audit_id = :aid ORDER BY uploaded_at DESC",
+                {"aid": audit_id}, cache_key=f"evidence_{audit_id}",
+            )
+            results = fetch_sql(
+                f"SELECT er.evaluation_id, er.control_id, er.ai_verdict, er.ai_confidence, "
+                f"er.ai_reasoning, er.evidence_summary, "
+                f"CAST(er.matched_document_ids AS STRING) AS matched_document_ids, "
+                f"er.auditor_verdict, er.auditor_notes, er.auditor_id, er.reviewed_at, "
+                f"er.model_used, er.prompt_version, er.evaluated_at, "
+                f"c.control_code, c.control_title, c.control_description, "
+                f"c.control_category, c.risk_level, c.framework "
+                f"FROM {FQ}.evaluation_results er "
+                f"JOIN {FQ}.controls c ON er.control_id = c.control_id "
+                f"WHERE er.audit_id = :aid ORDER BY c.control_code",
+                {"aid": audit_id}, cache_key=f"results_{audit_id}",
+            )
+        else:
+            audit_rows = pg_fetch("SELECT * FROM audit_engagements WHERE audit_id = %s", (audit_id,))
+            controls = pg_fetch("SELECT control_id::text, audit_id, control_code, framework, control_title, control_description, control_category, risk_level, frequency, control_owner FROM controls WHERE audit_id = %s ORDER BY control_code", (audit_id,))
+            evidence = pg_fetch("SELECT document_id::text, audit_id, original_filename, file_type, file_size_bytes, page_count, parse_status, ocr_applied, uploaded_at FROM evidence_documents WHERE audit_id = %s ORDER BY uploaded_at DESC", (audit_id,))
+            results = pg_fetch("SELECT er.evaluation_id::text, er.control_id::text, er.ai_verdict, er.ai_confidence, er.ai_reasoning, er.evidence_summary, er.matched_document_ids, er.auditor_verdict, er.auditor_notes, er.auditor_id, er.reviewed_at, er.model_used, er.prompt_version, er.evaluated_at, c.control_code, c.control_title, c.control_description, c.control_category, c.risk_level, c.framework FROM evaluation_results er JOIN controls c ON er.control_id = c.control_id WHERE er.audit_id = %s ORDER BY c.control_code", (audit_id,))
+
+        elapsed = round((time.time() - t0) * 1000)
+        logger.info(f"Batch load for {audit_id}: {elapsed}ms")
+
+        return {
+            "audit": audit_rows[0] if audit_rows else None,
+            "controls": controls,
+            "evidence": evidence,
+            "results": results,
+            "load_time_ms": elapsed,
+        }
+    except Exception as e:
+        logger.error(f"Batch endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---- Audit Engagements ----
 
 @app.get("/api/audits")
 async def list_audits():
     if BACKEND_MODE == "lakebase":
         return pg_fetch("SELECT * FROM audit_engagements ORDER BY created_at DESC")
-    return fetch_sql(f"SELECT * FROM {FQ}.audit_engagements ORDER BY created_at DESC")
+    return fetch_sql(f"SELECT * FROM {FQ}.audit_engagements ORDER BY created_at DESC",
+                     cache_key="audits_list")
 
 
 @app.post("/api/audits")

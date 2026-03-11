@@ -10,6 +10,7 @@ import type {
   DashboardStats,
 } from '../types'
 import * as api from '../api/client'
+import axios from 'axios'
 
 interface AppState {
   // Data
@@ -38,6 +39,7 @@ interface AppState {
   loadControls: (auditId: string) => Promise<void>
   loadEvidence: (auditId: string) => Promise<void>
   loadResults: (auditId: string) => Promise<void>
+  loadEvidenceMatches: (auditId: string) => Promise<void>
   loadAnnotations: (auditId: string, documentId?: string) => Promise<void>
   loadFindings: (auditId: string) => Promise<void>
   loadDashboardStats: (auditId: string) => Promise<void>
@@ -76,19 +78,42 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   selectAudit: async (auditId: string) => {
+    set({ isLoading: true, error: null })
+
     try {
-      set({ isLoading: true, error: null })
+      // Try batch endpoint first (single call)
+      const resp = await axios.get(`/api/audits/${auditId}/batch`)
+      const batch = resp.data
+
+      if (batch.audit) {
+        set({
+          currentAudit: batch.audit,
+          controls: batch.controls || [],
+          evidence: batch.evidence || [],
+          results: batch.results || [],
+          isLoading: false,
+        })
+        // Load evidence matches in background (deferred)
+        get().loadEvidenceMatches(auditId)
+        return
+      }
+    } catch (e: any) {
+      console.warn('Batch endpoint failed, using individual calls:', e.message)
+    }
+
+    // Fallback to individual calls
+    try {
       const audit = await api.getAudit(auditId)
       set({ currentAudit: audit, isLoading: false })
-      const { loadControls, loadEvidence, loadResults, loadDashboardStats } = get()
+      const { loadControls, loadEvidence, loadResults } = get()
       await Promise.all([
         loadControls(auditId),
         loadEvidence(auditId),
         loadResults(auditId),
-        loadDashboardStats(auditId),
       ])
-    } catch (e: any) {
-      set({ error: e.message, isLoading: false })
+      get().loadEvidenceMatches(auditId)
+    } catch (e2: any) {
+      set({ error: e2.message, isLoading: false })
     }
   },
 
@@ -114,11 +139,15 @@ export const useStore = create<AppState>((set, get) => ({
 
   loadResults: async (auditId) => {
     try {
-      const [results, evidenceMatches] = await Promise.all([
-        api.getResults(auditId),
-        api.getEvidenceMatches(auditId),
-      ])
-      set({ results, evidenceMatches })
+      const results = await api.getResults(auditId)
+      set({ results })
+    } catch { /* empty */ }
+  },
+
+  loadEvidenceMatches: async (auditId) => {
+    try {
+      const evidenceMatches = await api.getEvidenceMatches(auditId)
+      set({ evidenceMatches })
     } catch { /* empty */ }
   },
 
