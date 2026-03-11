@@ -386,10 +386,12 @@ async def get_results_summary(audit_id: str):
 
 @app.get("/api/audits/{audit_id}/evidence-matches")
 async def get_all_evidence_matches(audit_id: str):
+    """Get evidence matches with char offsets and contextual paragraphs."""
     if BACKEND_MODE == "lakebase":
-        return pg_fetch(
-            """SELECT m.control_id::text, c.control_code,
+        matches = pg_fetch(
+            """SELECT m.match_id::text, m.control_id::text, c.control_code, c.control_title,
                       dc.chunk_id::text, dc.chunk_text, dc.chunk_index,
+                      dc.start_char, dc.end_char,
                       ed.original_filename, ed.document_id::text,
                       ROUND(m.similarity_score::numeric, 4) AS similarity_score, m.match_rank
                FROM control_evidence_matches m
@@ -400,19 +402,62 @@ async def get_all_evidence_matches(audit_id: str):
                ORDER BY c.control_code, m.match_rank""",
             (audit_id,),
         )
-    return fetch_sql(
-        f"SELECT m.control_id, c.control_code, "
-        f"dc.chunk_id, dc.chunk_text, dc.chunk_index, "
-        f"ed.original_filename, ed.document_id, "
-        f"ROUND(m.similarity_score, 4) AS similarity_score, m.match_rank "
-        f"FROM {FQ}.control_evidence_matches m "
-        f"JOIN {FQ}.controls c ON m.control_id = c.control_id "
-        f"JOIN {FQ}.document_chunks dc ON m.chunk_id = dc.chunk_id "
-        f"JOIN {FQ}.evidence_documents ed ON m.document_id = ed.document_id "
-        f"WHERE m.audit_id = :aid AND m.similarity_score >= 0.4 AND m.match_rank <= 8 "
-        f"ORDER BY c.control_code, m.match_rank",
-        {"aid": audit_id},
-    )
+    else:
+        matches = fetch_sql(
+            f"SELECT m.match_id, m.control_id, c.control_code, c.control_title, "
+            f"dc.chunk_id, dc.chunk_text, dc.chunk_index, "
+            f"dc.start_char, dc.end_char, "
+            f"ed.original_filename, ed.document_id, "
+            f"ROUND(m.similarity_score, 4) AS similarity_score, m.match_rank "
+            f"FROM {FQ}.control_evidence_matches m "
+            f"JOIN {FQ}.controls c ON m.control_id = c.control_id "
+            f"JOIN {FQ}.document_chunks dc ON m.chunk_id = dc.chunk_id "
+            f"JOIN {FQ}.evidence_documents ed ON m.document_id = ed.document_id "
+            f"WHERE m.audit_id = :aid AND m.similarity_score >= 0.4 AND m.match_rank <= 8 "
+            f"ORDER BY c.control_code, m.match_rank",
+            {"aid": audit_id},
+        )
+
+    # Expand each match to include contextual paragraph from full document
+    doc_cache = {}
+    for match in matches:
+        doc_id = match.get("document_id")
+        start = match.get("start_char")
+        end = match.get("end_char")
+
+        # Get full doc text (cached)
+        if doc_id and doc_id not in doc_cache:
+            if BACKEND_MODE == "lakebase":
+                doc_row = pg_fetch_one("SELECT extracted_text FROM evidence_documents WHERE document_id::text = %s", (doc_id,))
+            else:
+                doc_rows = fetch_sql(f"SELECT extracted_text FROM {FQ}.evidence_documents WHERE document_id = :did", {"did": doc_id})
+                doc_row = doc_rows[0] if doc_rows else None
+            doc_cache[doc_id] = (doc_row or {}).get("extracted_text", "")
+
+        full_text = doc_cache.get(doc_id, "")
+
+        # Build context paragraph: expand to surrounding paragraph boundaries
+        if full_text and start is not None and end is not None:
+            start = int(start)
+            end = min(int(end), len(full_text))
+
+            # Find paragraph start (look back for double newline)
+            ctx_start = full_text.rfind("\n\n", 0, start)
+            ctx_start = ctx_start + 2 if ctx_start >= 0 else max(0, start - 200)
+
+            # Find paragraph end (look forward for double newline)
+            ctx_end = full_text.find("\n\n", end)
+            ctx_end = ctx_end if ctx_end >= 0 else min(len(full_text), end + 200)
+
+            match["context_text"] = full_text[ctx_start:ctx_end].strip()
+            match["context_start"] = ctx_start
+            match["context_end"] = ctx_end
+        else:
+            match["context_text"] = match.get("chunk_text", "")
+            match["context_start"] = start or 0
+            match["context_end"] = end or 0
+
+    return matches
 
 
 @app.get("/api/results/{evaluation_id}")
@@ -516,7 +561,11 @@ async def submit_review(evaluation_id: str, review: ReviewRequest):
 
 @app.get("/api/audits/{audit_id}/annotations")
 async def get_annotations(audit_id: str, document_id: Optional[str] = None, control_id: Optional[str] = None):
-    """Get annotations for evidence highlighting."""
+    """Get annotations for evidence highlighting.
+    Auto-generates from evidence matches when no explicit annotations exist."""
+
+    # Try explicit annotations first
+    annotations = []
     if BACKEND_MODE == "lakebase":
         sql = """SELECT annotation_id::text, control_id::text, document_id::text, chunk_id::text,
                         audit_id, start_char, end_char, similarity_score, explanation_text,
@@ -530,7 +579,7 @@ async def get_annotations(audit_id: str, document_id: Optional[str] = None, cont
             sql += " AND control_id::text = %s"
             params.append(control_id)
         sql += " ORDER BY start_char"
-        return pg_fetch(sql, tuple(params))
+        annotations = pg_fetch(sql, tuple(params))
     else:
         sql = (
             f"SELECT annotation_id, control_id, document_id, chunk_id, "
@@ -546,7 +595,50 @@ async def get_annotations(audit_id: str, document_id: Optional[str] = None, cont
             sql += " AND control_id = :cid"
             p["cid"] = control_id
         sql += " ORDER BY start_char"
-        return fetch_sql(sql, p)
+        try:
+            annotations = fetch_sql(sql, p)
+        except Exception:
+            annotations = []
+
+    # Auto-generate annotations from evidence matches if none exist
+    if not annotations and control_id:
+        if BACKEND_MODE == "lakebase":
+            matches = pg_fetch(
+                """SELECT m.match_id::text AS annotation_id, m.control_id::text, m.document_id::text,
+                          dc.chunk_id::text, %s AS audit_id,
+                          dc.start_char, dc.end_char, m.similarity_score,
+                          CONCAT(c.control_code, ': Evidence match from ', ed.original_filename) AS explanation_text,
+                          c.control_code, c.control_title, 'EVIDENCE_MATCH' AS violation_type,
+                          m._matched_at AS created_at
+                   FROM control_evidence_matches m
+                   JOIN document_chunks dc ON m.chunk_id = dc.chunk_id
+                   JOIN controls c ON m.control_id = c.control_id
+                   JOIN evidence_documents ed ON m.document_id = ed.document_id
+                   WHERE m.audit_id = %s AND m.control_id::text = %s
+                     AND m.similarity_score >= 0.4 AND dc.start_char IS NOT NULL
+                   ORDER BY dc.start_char""",
+                (audit_id, audit_id, control_id),
+            )
+        else:
+            matches = fetch_sql(
+                f"SELECT m.match_id AS annotation_id, m.control_id, m.document_id, "
+                f"dc.chunk_id, m.audit_id, "
+                f"dc.start_char, dc.end_char, m.similarity_score, "
+                f"CONCAT(c.control_code, ': Evidence match from ', ed.original_filename) AS explanation_text, "
+                f"c.control_code, c.control_title, 'EVIDENCE_MATCH' AS violation_type, "
+                f"m._matched_at AS created_at "
+                f"FROM {FQ}.control_evidence_matches m "
+                f"JOIN {FQ}.document_chunks dc ON m.chunk_id = dc.chunk_id "
+                f"JOIN {FQ}.controls c ON m.control_id = c.control_id "
+                f"JOIN {FQ}.evidence_documents ed ON m.document_id = ed.document_id "
+                f"WHERE m.audit_id = :aid AND m.control_id = :cid "
+                f"AND m.similarity_score >= 0.4 "
+                f"ORDER BY dc.start_char",
+                {"aid": audit_id, "cid": control_id},
+            )
+        annotations = [m for m in matches if m.get("start_char") is not None]
+
+    return annotations
 
 
 # ---- Dashboard Stats ----

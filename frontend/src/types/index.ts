@@ -57,6 +57,7 @@ export interface EvidenceMatch {
   match_id: string
   control_id: string
   control_code: string
+  control_title: string
   chunk_id: string
   chunk_text: string
   chunk_index: number
@@ -64,6 +65,11 @@ export interface EvidenceMatch {
   original_filename: string
   similarity_score: number
   match_rank: number
+  start_char: number
+  end_char: number
+  context_text: string
+  context_start: number
+  context_end: number
 }
 
 export interface Annotation {

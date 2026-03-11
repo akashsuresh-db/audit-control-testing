@@ -12,14 +12,32 @@ WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID", "1b1d59e180e4ac26")
 def get_connection():
     """Get a Databricks SQL connection using SDK auth."""
     w = WorkspaceClient()
-    return databricks_sql.connect(
-        server_hostname=w.config.host.replace("https://", "").replace("http://", ""),
-        http_path=f"/sql/1.0/warehouses/{WAREHOUSE_ID}",
-        credentials_provider=lambda: w.config.authenticate,
-    )
+    host = (w.config.host or "").replace("https://", "").replace("http://", "")
+
+    # Get access token from SDK auth headers
+    auth_headers = w.config.authenticate()
+    token = None
+    if isinstance(auth_headers, dict):
+        auth_val = auth_headers.get("Authorization", "")
+        if auth_val.startswith("Bearer "):
+            token = auth_val.replace("Bearer ", "")
+
+    if token:
+        return databricks_sql.connect(
+            server_hostname=host,
+            http_path=f"/sql/1.0/warehouses/{WAREHOUSE_ID}",
+            access_token=token,
+        )
+    else:
+        # Fallback: try credentials_provider
+        return databricks_sql.connect(
+            server_hostname=host,
+            http_path=f"/sql/1.0/warehouses/{WAREHOUSE_ID}",
+            credentials_provider=lambda: w.config.authenticate,
+        )
 
 
-def execute_sql(statement: str, params: dict | None = None):
+def execute_sql(statement, params=None):
     """Execute a SQL statement with optional named parameters."""
     with get_connection() as conn:
         with conn.cursor() as cursor:
@@ -29,7 +47,7 @@ def execute_sql(statement: str, params: dict | None = None):
                 cursor.execute(statement)
 
 
-def fetch_sql(statement: str, params: dict | None = None) -> list[dict]:
+def fetch_sql(statement, params=None):
     """Execute a SQL query and return results as list of dicts."""
     with get_connection() as conn:
         with conn.cursor() as cursor:
