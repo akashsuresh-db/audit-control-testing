@@ -12,6 +12,8 @@ import {
   ChevronRight,
   Plus,
   Building2,
+  BookOpen,
+  Dice5,
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -21,6 +23,8 @@ const navItems = [
   { path: '/evidence', label: 'Evidence Library', icon: FileText },
   { path: '/investigation', label: 'Investigation', icon: Search },
   { path: '/findings', label: 'Findings', icon: AlertTriangle },
+  { path: '/workpapers', label: 'Workpapers', icon: BookOpen },
+  { path: '/sampling', label: 'Sampling', icon: Dice5 },
   { path: '/reports', label: 'Reports', icon: BarChart3 },
   { path: '/audit-log', label: 'Audit Trail', icon: ClipboardList },
 ]

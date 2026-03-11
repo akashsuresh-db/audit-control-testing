@@ -780,6 +780,324 @@ async def run_similarity_search(audit_id: str, query_embedding: list[float], top
     return {"results": results, "count": len(results)}
 
 
+# ---- Evidence Sufficiency Engine ----
+
+@app.get("/api/audits/{audit_id}/sufficiency")
+async def get_evidence_sufficiency(audit_id: str):
+    """Compute evidence sufficiency scores for each control."""
+    if BACKEND_MODE == "databricks":
+        controls_data = fetch_sql(
+            f"SELECT c.control_id, c.control_code, c.control_title, c.control_description, c.risk_level "
+            f"FROM {FQ}.controls c WHERE c.audit_id = :aid ORDER BY c.control_code",
+            {"aid": audit_id},
+        )
+        matches_data = fetch_sql(
+            f"SELECT m.control_id, m.similarity_score, m.match_rank, ed.original_filename, ed.document_id "
+            f"FROM {FQ}.control_evidence_matches m "
+            f"JOIN {FQ}.evidence_documents ed ON m.document_id = ed.document_id "
+            f"WHERE m.audit_id = :aid AND m.similarity_score >= 0.4",
+            {"aid": audit_id},
+        )
+        results_data = fetch_sql(
+            f"SELECT control_id, ai_verdict, ai_confidence FROM {FQ}.evaluation_results WHERE audit_id = :aid",
+            {"aid": audit_id},
+        )
+    else:
+        controls_data = pg_fetch("SELECT control_id::text, control_code, control_title, control_description, risk_level FROM controls WHERE audit_id = %s ORDER BY control_code", (audit_id,))
+        matches_data = pg_fetch("SELECT m.control_id::text, m.similarity_score, m.match_rank, ed.original_filename, ed.document_id::text FROM control_evidence_matches m JOIN evidence_documents ed ON m.document_id = ed.document_id WHERE m.audit_id = %s AND m.similarity_score >= 0.4", (audit_id,))
+        results_data = pg_fetch("SELECT control_id::text, ai_verdict, ai_confidence FROM evaluation_results WHERE audit_id = %s", (audit_id,))
+
+    # Build lookup maps
+    matches_by_ctrl = {}
+    for m in matches_data:
+        cid = m["control_id"]
+        matches_by_ctrl.setdefault(cid, []).append(m)
+
+    results_by_ctrl = {r["control_id"]: r for r in results_data}
+
+    sufficiency = []
+    for ctrl in controls_data:
+        cid = ctrl["control_id"]
+        ctrl_matches = matches_by_ctrl.get(cid, [])
+        result = results_by_ctrl.get(cid, {})
+
+        # Compute sufficiency metrics
+        source_count = len(set(m.get("document_id", "") for m in ctrl_matches))
+        avg_score = sum(m.get("similarity_score", 0) for m in ctrl_matches) / max(len(ctrl_matches), 1)
+        max_score = max((m.get("similarity_score", 0) for m in ctrl_matches), default=0)
+        high_quality = sum(1 for m in ctrl_matches if (m.get("similarity_score", 0) or 0) >= 0.7)
+
+        # Score formula: sources * 15 + avg_quality * 30 + high_matches * 10 + confidence * 20
+        confidence = float(result.get("ai_confidence", 0) or 0)
+        raw_score = min(100, (
+            min(source_count, 3) * 15 +
+            avg_score * 30 +
+            min(high_quality, 3) * 10 +
+            confidence * 20 +
+            (5 if result.get("ai_verdict") == "PASS" else 0)
+        ))
+        score = round(raw_score)
+
+        if score >= 70:
+            status = "SUFFICIENT"
+        elif score >= 40:
+            status = "PARTIAL"
+        else:
+            status = "INSUFFICIENT"
+
+        sufficiency.append({
+            "control_id": cid,
+            "control_code": ctrl["control_code"],
+            "control_title": ctrl["control_title"],
+            "risk_level": ctrl["risk_level"],
+            "evidence_sources": source_count,
+            "total_matches": len(ctrl_matches),
+            "avg_similarity": round(avg_score, 3),
+            "max_similarity": round(max_score, 3),
+            "high_quality_matches": high_quality,
+            "ai_verdict": result.get("ai_verdict"),
+            "ai_confidence": confidence,
+            "sufficiency_score": score,
+            "sufficiency_status": status,
+        })
+
+    return sufficiency
+
+
+# ---- Workpapers ----
+
+@app.get("/api/audits/{audit_id}/workpapers")
+async def get_workpapers(audit_id: str):
+    """Generate audit workpapers for each control."""
+    if BACKEND_MODE == "databricks":
+        controls_data = fetch_sql(
+            f"SELECT c.control_id, c.control_code, c.control_title, c.control_description, "
+            f"c.control_category, c.risk_level, c.frequency "
+            f"FROM {FQ}.controls c WHERE c.audit_id = :aid ORDER BY c.control_code",
+            {"aid": audit_id},
+        )
+        results_data = fetch_sql(
+            f"SELECT er.control_id, er.ai_verdict, er.ai_confidence, er.ai_reasoning, "
+            f"er.evidence_summary, er.auditor_verdict, er.auditor_notes, er.auditor_id, er.reviewed_at "
+            f"FROM {FQ}.evaluation_results er WHERE er.audit_id = :aid",
+            {"aid": audit_id},
+        )
+        matches_data = fetch_sql(
+            f"SELECT m.control_id, ed.original_filename, m.similarity_score "
+            f"FROM {FQ}.control_evidence_matches m "
+            f"JOIN {FQ}.evidence_documents ed ON m.document_id = ed.document_id "
+            f"WHERE m.audit_id = :aid AND m.similarity_score >= 0.4 ORDER BY m.match_rank",
+            {"aid": audit_id},
+        )
+    else:
+        controls_data = pg_fetch("SELECT control_id::text, control_code, control_title, control_description, control_category, risk_level, frequency FROM controls WHERE audit_id = %s ORDER BY control_code", (audit_id,))
+        results_data = pg_fetch("SELECT control_id::text, ai_verdict, ai_confidence, ai_reasoning, evidence_summary, auditor_verdict, auditor_notes, auditor_id, reviewed_at FROM evaluation_results WHERE audit_id = %s", (audit_id,))
+        matches_data = pg_fetch("SELECT m.control_id::text, ed.original_filename, m.similarity_score FROM control_evidence_matches m JOIN evidence_documents ed ON m.document_id = ed.document_id WHERE m.audit_id = %s AND m.similarity_score >= 0.4 ORDER BY m.match_rank", (audit_id,))
+
+    results_map = {r["control_id"]: r for r in results_data}
+    matches_map = {}
+    for m in matches_data:
+        matches_map.setdefault(m["control_id"], []).append(m)
+
+    workpapers = []
+    for ctrl in controls_data:
+        cid = ctrl["control_id"]
+        result = results_map.get(cid, {})
+        ctrl_matches = matches_map.get(cid, [])
+        final_verdict = result.get("auditor_verdict") or result.get("ai_verdict") or "NOT TESTED"
+
+        evidence_reviewed = [
+            {"filename": m["original_filename"], "relevance": round(float(m.get("similarity_score", 0)) * 100)}
+            for m in ctrl_matches[:8]
+        ]
+
+        # Generate testing procedure based on control category
+        cat = ctrl.get("control_category", "General")
+        procedures = {
+            "Access Control": "1. Obtain access control policy and configuration.\n2. Review user provisioning process.\n3. Inspect sample of access requests for proper authorization.\n4. Verify periodic access review completion.\n5. Test for segregation of duties compliance.",
+            "Change Management": "1. Obtain change management policy.\n2. Review change advisory board meeting minutes.\n3. Select sample of change tickets and verify approval workflow.\n4. Test segregation between development and production.\n5. Verify post-implementation review documentation.",
+            "Financial Reporting": "1. Obtain month-end close checklist.\n2. Review reconciliation documentation.\n3. Inspect journal entries for proper approval.\n4. Verify management sign-off procedures.\n5. Test completeness and accuracy of financial records.",
+            "Vulnerability Management": "1. Obtain vulnerability scan reports.\n2. Verify scanning frequency meets policy requirements.\n3. Review remediation SLAs for critical and high findings.\n4. Inspect evidence of patching and remediation.\n5. Evaluate trend analysis and improvement metrics.",
+            "Business Continuity": "1. Obtain business continuity plan.\n2. Review disaster recovery test results.\n3. Verify RTO and RPO alignment with business requirements.\n4. Inspect backup and restoration test evidence.\n5. Evaluate plan update frequency and currency.",
+            "Network Security": "1. Obtain network architecture documentation.\n2. Review firewall rule sets and change logs.\n3. Verify network segmentation controls.\n4. Inspect intrusion detection system alerts.\n5. Test perimeter security controls.",
+        }
+        procedure = procedures.get(cat, f"1. Review {cat} policy.\n2. Inspect supporting evidence.\n3. Evaluate control effectiveness.\n4. Document findings.")
+
+        conclusion_map = {
+            "PASS": f"Based on the evidence reviewed, the control '{ctrl['control_title']}' is operating effectively. Evidence demonstrates compliance with the control objective.",
+            "FAIL": f"Testing identified deficiencies in the control '{ctrl['control_title']}'. The evidence does not support that the control is operating effectively. Findings have been documented for management remediation.",
+            "INSUFFICIENT_EVIDENCE": f"Insufficient evidence was available to evaluate the control '{ctrl['control_title']}'. Additional evidence should be requested to complete the assessment.",
+            "NOT TESTED": f"The control '{ctrl['control_title']}' has not yet been tested.",
+        }
+
+        workpapers.append({
+            "control_id": cid,
+            "control_code": ctrl["control_code"],
+            "control_title": ctrl["control_title"],
+            "control_objective": ctrl["control_description"],
+            "control_category": cat,
+            "risk_level": ctrl["risk_level"],
+            "frequency": ctrl.get("frequency", ""),
+            "testing_procedure": procedure,
+            "evidence_reviewed": evidence_reviewed,
+            "test_result": final_verdict,
+            "ai_confidence": float(result.get("ai_confidence", 0) or 0),
+            "ai_reasoning": result.get("ai_reasoning", ""),
+            "auditor_verdict": result.get("auditor_verdict"),
+            "auditor_notes": result.get("auditor_notes", ""),
+            "auditor_id": result.get("auditor_id", ""),
+            "reviewed_at": result.get("reviewed_at"),
+            "conclusion": conclusion_map.get(final_verdict, ""),
+        })
+
+    return workpapers
+
+
+# ---- Sampling Engine ----
+
+class SamplingRequest(BaseModel):
+    population_size: int
+    sample_size: int
+    method: str = "random"  # random, risk_based, stratified
+    risk_field: Optional[str] = None
+    strata_field: Optional[str] = None
+
+@app.post("/api/audits/{audit_id}/sampling")
+async def generate_sample(audit_id: str, req: SamplingRequest):
+    """Generate audit test sample from a population."""
+    import random
+    import math
+
+    population = list(range(1, req.population_size + 1))
+    sample_size = min(req.sample_size, req.population_size)
+
+    if req.method == "random":
+        sample = sorted(random.sample(population, sample_size))
+        method_desc = f"Simple random sampling: {sample_size} items selected from population of {req.population_size}"
+    elif req.method == "risk_based":
+        # Weight toward higher-numbered items (simulating higher risk)
+        weights = [i ** 1.5 for i in population]
+        total = sum(weights)
+        probs = [w / total for w in weights]
+        sample = sorted(random.choices(population, weights=probs, k=sample_size))
+        sample = sorted(list(set(sample)))[:sample_size]
+        method_desc = f"Risk-based sampling: {len(sample)} items selected with higher weighting for high-risk items"
+    elif req.method == "stratified":
+        # Split into 3 strata
+        strata_size = req.population_size // 3
+        strata = [
+            population[:strata_size],
+            population[strata_size:strata_size * 2],
+            population[strata_size * 2:],
+        ]
+        per_stratum = max(1, sample_size // 3)
+        sample = []
+        for s in strata:
+            sample.extend(sorted(random.sample(s, min(per_stratum, len(s)))))
+        sample = sorted(sample)[:sample_size]
+        method_desc = f"Stratified sampling: {len(sample)} items selected proportionally across 3 strata"
+    else:
+        sample = sorted(random.sample(population, sample_size))
+        method_desc = f"Random sampling: {sample_size} items"
+
+    # Calculate confidence level (simplified)
+    z = 1.96  # 95% confidence
+    p = 0.5
+    margin = z * math.sqrt(p * (1 - p) / sample_size) if sample_size > 0 else 1
+    confidence = round((1 - margin) * 100, 1)
+
+    return {
+        "audit_id": audit_id,
+        "population_size": req.population_size,
+        "sample_size": len(sample),
+        "method": req.method,
+        "method_description": method_desc,
+        "confidence_level": max(0, confidence),
+        "margin_of_error": round(margin * 100, 1),
+        "sample_items": sample,
+        "strata_count": 3 if req.method == "stratified" else 1,
+    }
+
+
+# ---- Findings Management ----
+
+class FindingCreate(BaseModel):
+    control_id: str
+    risk_rating: str = "HIGH"
+    title: str
+    root_cause: str = ""
+    impact: str = ""
+    recommendation: str = ""
+
+class FindingUpdate(BaseModel):
+    status: Optional[str] = None
+    management_response: Optional[str] = None
+    remediation_status: Optional[str] = None
+    risk_rating: Optional[str] = None
+
+@app.post("/api/audits/{audit_id}/findings")
+async def create_finding(audit_id: str, finding: FindingCreate):
+    """Create a new audit finding."""
+    finding_id = f"FND-{uuid.uuid4().hex[:8].upper()}"
+    if BACKEND_MODE == "databricks":
+        execute_sql(
+            f"INSERT INTO {FQ}.audit_findings "
+            f"(finding_id, audit_id, control_id, risk_rating, title, root_cause, impact, "
+            f"recommendation, status, created_at) "
+            f"VALUES (:fid, :aid, :cid, :risk, :title, :cause, :impact, :rec, 'OPEN', current_timestamp())",
+            {"fid": finding_id, "aid": audit_id, "cid": finding.control_id,
+             "risk": finding.risk_rating, "title": finding.title,
+             "cause": finding.root_cause, "impact": finding.impact,
+             "rec": finding.recommendation},
+        )
+    else:
+        pg_execute(
+            "INSERT INTO audit_findings (finding_id, audit_id, control_id, risk_rating, title, root_cause, impact, recommendation, status) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'OPEN')",
+            (finding_id, audit_id, finding.control_id, finding.risk_rating, finding.title, finding.root_cause, finding.impact, finding.recommendation),
+        )
+    return {"finding_id": finding_id, "status": "OPEN"}
+
+@app.put("/api/findings/{finding_id}")
+async def update_finding(finding_id: str, update: FindingUpdate):
+    """Update finding status or management response."""
+    sets = []
+    params = {}
+    if update.status:
+        sets.append("status = :status")
+        params["status"] = update.status
+    if update.management_response:
+        sets.append("management_response = :mgmt")
+        params["mgmt"] = update.management_response
+    if update.remediation_status:
+        sets.append("remediation_status = :rstat")
+        params["rstat"] = update.remediation_status
+    if update.risk_rating:
+        sets.append("risk_rating = :risk")
+        params["risk"] = update.risk_rating
+    if not sets:
+        return {"status": "no changes"}
+
+    params["fid"] = finding_id
+    if BACKEND_MODE == "databricks":
+        execute_sql(
+            f"UPDATE {FQ}.audit_findings SET {', '.join(sets)}, updated_at = current_timestamp() WHERE finding_id = :fid",
+            params,
+        )
+    else:
+        # Convert to pg-style params
+        pg_sets = []
+        pg_params = []
+        for s in sets:
+            col = s.split(" = ")[0]
+            pg_sets.append(f"{col} = %s")
+            key = s.split(":")[1] if ":" in s else col
+            pg_params.append(params.get(key.strip(), ""))
+        pg_params.append(finding_id)
+        pg_execute(f"UPDATE audit_findings SET {', '.join(pg_sets)}, updated_at = NOW() WHERE finding_id = %s", tuple(pg_params))
+
+    return {"finding_id": finding_id, "status": "updated"}
+
+
 # ---- Serve React dist files ----
 
 if os.path.exists(DIST_DIR):
